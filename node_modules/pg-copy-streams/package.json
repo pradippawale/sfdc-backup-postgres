@@ -1,0 +1,51 @@
+{
+  "name": "pg-copy-streams",
+  "version": "7.0.0",
+  "description": "Low-Level COPY TO and COPY FROM streams for PostgreSQL in JavaScript using",
+  "main": "index.js",
+  "scripts": {
+    "test": "npm run lint && mocha --v8-expose-gc",
+    "lint": "[ \"$(node -v | cut -d. -f1)\" = \"v8\" ] || eslint '**/*.{js,ts}'"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/brianc/node-pg-copy-streams.git"
+  },
+  "keywords": [
+    "postgres",
+    "copy",
+    "in",
+    "out",
+    "stream"
+  ],
+  "author": "Brian M. Carlson",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/brianc/node-pg-copy-streams/issues"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.1",
+    "@eslint/js": "^9.27.0",
+    "async": "~0.2.10",
+    "benchmark": "^2.1.4",
+    "concat-stream": "^2.0.0",
+    "csv-parse": "^5.6.0",
+    "csv-parser": "^3.2.0",
+    "duplex-child-process": "^1.0.0",
+    "eslint": "^9.27.0",
+    "eslint-config-prettier": "^10.1.5",
+    "eslint-plugin-prettier": "^5.4.0",
+    "globals": "^16.2.0",
+    "lodash": "^4.17.21",
+    "mocha": "^11.5.0",
+    "pg": "^8.16.0",
+    "prettier": "^3.5.3"
+  },
+  "prettier": {
+    "semi": false,
+    "printWidth": 120,
+    "arrowParens": "always",
+    "trailingComma": "es5",
+    "singleQuote": true
+  }
+}
