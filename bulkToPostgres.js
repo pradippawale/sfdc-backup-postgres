@@ -6,32 +6,30 @@ const csv = require('csv-parser');
 const copyFrom = require('pg-copy-streams').from;
 const { parse } = require('csv-parse');
 const { stringify } = require('csv-stringify');
-const pLimit = require('p-limit').default; // ✅ FIX: no `.default`
+const pLimit = require('p-limit'); // ✅ Works with version 2
 
-// === CONFIG ===
-const ACCESS_TOKEN = '00DfJ000002QrbH!AQEAQF11EjB.Nx5.rHXQ.V_sRksazBynBhfC8ZbWl1S1aG0gNez_MutGGqYWA1om43NswEtuBgljHJgp1uwErLd_SlNgFB_i';
-const INSTANCE_URL = 'https://coresolute4-dev-ed.develop.my.salesforce.com';
+// === CONFIGURATION ===
+const ACCESS_TOKEN = process.env.SF_ACCESS_TOKEN;
+const INSTANCE_URL = process.env.SF_INSTANCE_URL;
 const API_VERSION = 'v60.0';
 
 const PG_CONFIG = {
-    host: 'dpg-d1i3u8fdiees73cf0dug-a.oregon-postgres.render.com',
+    host: process.env.PG_HOST,
     port: 5432,
-    database: 'sfdatabase_34oi',
-    user: 'sfdatabaseuser',
-    password: 'D898TUsAal4ksBUs5QoQffxMZ6MY5aAH',
+    database: process.env.PG_DATABASE,
+    user: process.env.PG_USER,
+    password: process.env.PG_PASSWORD,
     ssl: { rejectUnauthorized: false }
 };
 
 const delay = ms => new Promise(res => setTimeout(res, ms));
 let FIELD_TYPES_MAP = {};
 
-// === SFDC HELPERS ===
+// === SFDC API HELPERS ===
 async function getAllObjectNames() {
     const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects`;
     const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
-    return res.data.sobjects
-        .filter(o => o.queryable && !o.name.endsWith('__Share') && !o.name.endsWith('__Tag'))
-        .map(o => o.name);
+    return res.data.sobjects.filter(o => o.queryable && !o.name.endsWith('__Share') && !o.name.endsWith('__Tag')).map(o => o.name);
 }
 
 async function hasRecords(objectName) {
@@ -66,9 +64,7 @@ async function createBulkQueryJob(soql) {
         operation: 'query',
         query: soql,
         contentType: 'CSV'
-    }, {
-        headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, 'Content-Type': 'application/json' }
-    });
+    }, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, 'Content-Type': 'application/json' } });
 
     return res.data;
 }
@@ -76,6 +72,7 @@ async function createBulkQueryJob(soql) {
 async function pollJob(jobId) {
     const url = `${INSTANCE_URL}/services/data/${API_VERSION}/jobs/query/${jobId}`;
     let state = 'InProgress';
+
     while (state === 'InProgress' || state === 'UploadComplete') {
         const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
         state = res.data.state;
@@ -92,27 +89,18 @@ async function downloadResults(jobId) {
         responseType: 'stream'
     });
 
-    const tempFilePath = path.join(__dirname, `temp_${jobId}.csv`);
+    const tempFilePath = path.join(__dirname, `temp.csv`);
     const writer = fs.createWriteStream(tempFilePath);
     res.data.pipe(writer);
-
     return new Promise((resolve, reject) => {
         writer.on('finish', () => resolve(tempFilePath));
         writer.on('error', reject);
     });
 }
 
-// ✅ FIX: safe parsing
 async function cleanCSV(filePath) {
     const outputPath = filePath.replace('.csv', '_clean.csv');
-    const parser = fs.createReadStream(filePath).pipe(parse({
-        columns: true,
-        relax_quotes: true,
-        relax_column_count: true,
-        skip_empty_lines: true,
-        trim: true
-    }));
-
+    const parser = fs.createReadStream(filePath).pipe(parse({ columns: true }));
     const writer = fs.createWriteStream(outputPath);
     const stringifier = stringify({ header: true });
 
@@ -206,28 +194,28 @@ async function backupObject(objectName) {
         try {
             const count = await insertCSVToPostgres(cleanPath, objectName);
             await logBackup({ objectName, recordCount: count, status: 'Success' });
-            fs.unlinkSync(rawPath); // Delete only after success
+            fs.unlinkSync(rawPath); // ✅ Delete on success
             fs.unlinkSync(cleanPath);
             console.log(`✅ Success: ${objectName}`);
         } catch (insertErr) {
-            console.error(`⚠️ Insert failed: ${objectName}, CSV kept`);
+            console.error(`⚠️ Insert failed: ${objectName}`);
             await logBackup({ objectName, recordCount: 0, status: 'Failed', error: insertErr.message });
         }
     } catch (err) {
-        console.warn(`❌ Failed: ${objectName}`, err.message);
+        console.warn(`❌ Failed: ${objectName}:`, err.message);
         await logBackup({ objectName, recordCount: 0, status: 'Failed', error: err.message });
     }
 }
 
-// === Run All with Concurrency Limit ===
+// === Run All with Concurrency ===
 (async () => {
     try {
         const objectNames = await getAllObjectNames();
-        const limit = pLimit(4); // Max 4 objects in parallel
+        const limit = pLimit(5); // ⏱️ Max 5 at once
 
         await Promise.all(objectNames.map(name => limit(() => backupObject(name))));
         console.log('\n🎉 All backups completed!');
     } catch (err) {
-        console.error('❌ Fatal Error:', err.message);
+        console.error('❌ Fatal:', err.message);
     }
 })();

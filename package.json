@@ -22,7 +22,7 @@
     "csv-parse": "^5.6.0",
     "csv-parser": "^3.2.0",
     "csv-stringify": "^6.5.2",
-    "p-limit": "^6.2.0",
+    "p-limit": "^2.3.0",
     "pg": "^8.16.3",
     "pg-copy-streams": "^7.0.0"
   }
