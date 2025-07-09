@@ -1,31 +1,33 @@
+// === Imports ===
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const express = require('express');
 const { Client } = require('pg');
 const csv = require('csv-parser');
 const copyFrom = require('pg-copy-streams').from;
 const { parse } = require('csv-parse');
 const { stringify } = require('csv-stringify');
-const pLimit = require('p-limit'); // ✅ Works with v2
-
-// === CONFIGURATION ===
-const ACCESS_TOKEN = '00DfJ000002QrbH!AQEAQF11EjB.Nx5.rHXQ.V_sRksazBynBhfC8ZbWl1S1aG0gNez_MutGGqYWA1om43NswEtuBgljHJgp1uwErLd_SlNgFB_i';
-const INSTANCE_URL = 'https://coresolute4-dev-ed.develop.my.salesforce.com';
-const API_VERSION = 'v60.0';
-
-const PG_CONFIG = {
-    host: 'dpg-d1i3u8fdiees73cf0dug-a.oregon-postgres.render.com',
-    port: 5432,
-    database: 'sfdatabase_34oi',
-    user: 'sfdatabaseuser',
-    password: 'D898TUsAal4ksBUs5QoQffxMZ6MY5aAH',
-    ssl: { rejectUnauthorized: false }
-};
+const pLimit = require('p-limit');
 
 const delay = ms => new Promise(res => setTimeout(res, ms));
 let FIELD_TYPES_MAP = {};
 
-// === SFDC HELPERS ===
+// === Configuration ===
+const ACCESS_TOKEN = 'YOUR_SF_TOKEN';
+const INSTANCE_URL = 'https://your-instance.my.salesforce.com';
+const API_VERSION = 'v60.0';
+
+const PG_CONFIG = {
+    host: 'your-host',
+    port: 5432,
+    database: 'your-db',
+    user: 'your-user',
+    password: 'your-password',
+    ssl: { rejectUnauthorized: false }
+};
+
+// === Salesforce Helpers ===
 async function getAllObjectNames() {
     const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects`;
     const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
@@ -77,9 +79,7 @@ async function pollJob(jobId, timeout = 5 * 60 * 1000) {
     const start = Date.now();
 
     while (state === 'InProgress' || state === 'UploadComplete') {
-        if (Date.now() - start > timeout) {
-            throw new Error(`Polling timeout for job ${jobId}`);
-        }
+        if (Date.now() - start > timeout) throw new Error(`Polling timeout for job ${jobId}`);
         const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
         state = res.data.state;
         if (state === 'JobComplete') return;
@@ -171,7 +171,7 @@ async function insertCSVToPostgres(filePath, objectName) {
             stream.on('error', reject);
         });
 
-        return headers.length; // ✅ Returning count
+        return headers.length;
     } finally {
         await client.end();
     }
@@ -195,7 +195,6 @@ async function logBackup({ objectName, recordCount, status, error }) {
     });
 }
 
-// === MAIN BACKUP PROCESS ===
 async function backupObject(objectName) {
     try {
         const hasData = await hasRecords(objectName);
@@ -212,33 +211,43 @@ async function backupObject(objectName) {
         const rawPath = await downloadResults(job.id);
         const cleanPath = await cleanCSV(rawPath);
 
-        try {
-            const recordCount = await insertCSVToPostgres(cleanPath, objectName);
-            await logBackup({ objectName, recordCount, status: 'Success' });
+        const recordCount = await insertCSVToPostgres(cleanPath, objectName);
+        await logBackup({ objectName, recordCount, status: 'Success' });
 
-            try { fs.unlinkSync(rawPath); } catch (e) { console.warn(`⚠️ Could not delete raw file: ${rawPath}`); }
-            try { fs.unlinkSync(cleanPath); } catch (e) { console.warn(`⚠️ Could not delete clean file: ${cleanPath}`); }
-
-            console.log(`✅ Success: ${objectName}`);
-        } catch (insertErr) {
-            console.error(`⚠️ Insert failed: ${objectName}: ${insertErr.message}`);
-            await logBackup({ objectName, recordCount: 0, status: 'Failed', error: insertErr.message });
-        }
+        fs.unlinkSync(rawPath);
+        fs.unlinkSync(cleanPath);
+        console.log(`✅ Success: ${objectName}`);
     } catch (err) {
         console.warn(`❌ Failed: ${objectName}: ${err.message}`);
         await logBackup({ objectName, recordCount: 0, status: 'Failed', error: err.message });
     }
 }
 
-// === RUN ALL ===
-(async () => {
-    try {
-        const objectNames = await getAllObjectNames();
-        const limit = pLimit(1); // Sequential; increase to 5+ if needed
+// === EXPRESS SERVER (for on-demand trigger) ===
+const app = express();
+app.use(express.json());
 
-        await Promise.all(objectNames.map(name => limit(() => backupObject(name))));
-        console.log('\n🎉 All backups completed!');
+app.get('/', (_, res) => res.send('✅ Salesforce Backup Service Running.'));
+
+app.post('/api/backup', async (req, res) => {
+    try {
+        const inputList = req.body.objectNames || [];
+        const allObjects = await getAllObjectNames();
+        const selected = inputList.length ? allObjects.filter(o => inputList.includes(o)) : allObjects;
+
+        const limit = pLimit(1);
+        for (let i = 0; i < selected.length; i++) {
+            await limit(() => backupObject(selected[i]));
+        }
+
+        res.json({ message: '✅ Backup completed.', objects: selected });
     } catch (err) {
-        console.error('❌ Fatal:', err.message);
+        console.error('❌ API Error:', err.message);
+        res.status(500).json({ error: err.message });
     }
-})();
+});
+
+const PORT = process.env.PORT || 3000;
+if (require.main === module) {
+    app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+}
