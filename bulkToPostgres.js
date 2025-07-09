@@ -6,30 +6,32 @@ const csv = require('csv-parser');
 const copyFrom = require('pg-copy-streams').from;
 const { parse } = require('csv-parse');
 const { stringify } = require('csv-stringify');
-const pLimit = require('p-limit'); // ✅ Works with version 2
+const pLimit = require('p-limit'); // ✅ Works with v2
 
 // === CONFIGURATION ===
-const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
-const INSTANCE_URL = process.env.INSTANCE_URL;
+const ACCESS_TOKEN = '00DfJ000002QrbH!AQEAQF11EjB.Nx5.rHXQ.V_sRksazBynBhfC8ZbWl1S1aG0gNez_MutGGqYWA1om43NswEtuBgljHJgp1uwErLd_SlNgFB_i';
+const INSTANCE_URL = 'https://coresolute4-dev-ed.develop.my.salesforce.com';
 const API_VERSION = 'v60.0';
 
 const PG_CONFIG = {
-    host: process.env.PG_HOST,
+    host: 'dpg-d1i3u8fdiees73cf0dug-a.oregon-postgres.render.com',
     port: 5432,
-    database: process.env.PG_DATABASE,
-    user: process.env.PG_USER,
-    password: process.env.PG_PASSWORD,
+    database: 'sfdatabase_34oi',
+    user: 'sfdatabaseuser',
+    password: 'D898TUsAal4ksBUs5QoQffxMZ6MY5aAH',
     ssl: { rejectUnauthorized: false }
 };
 
 const delay = ms => new Promise(res => setTimeout(res, ms));
 let FIELD_TYPES_MAP = {};
 
-// === SFDC API HELPERS ===
+// === SFDC HELPERS ===
 async function getAllObjectNames() {
     const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects`;
     const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
-    return res.data.sobjects.filter(o => o.queryable && !o.name.endsWith('__Share') && !o.name.endsWith('__Tag')).map(o => o.name);
+    return res.data.sobjects
+        .filter(o => o.queryable && !o.name.endsWith('__Share') && !o.name.endsWith('__Tag'))
+        .map(o => o.name);
 }
 
 async function hasRecords(objectName) {
@@ -69,11 +71,15 @@ async function createBulkQueryJob(soql) {
     return res.data;
 }
 
-async function pollJob(jobId) {
+async function pollJob(jobId, timeout = 5 * 60 * 1000) {
     const url = `${INSTANCE_URL}/services/data/${API_VERSION}/jobs/query/${jobId}`;
     let state = 'InProgress';
+    const start = Date.now();
 
     while (state === 'InProgress' || state === 'UploadComplete') {
+        if (Date.now() - start > timeout) {
+            throw new Error(`Polling timeout for job ${jobId}`);
+        }
         const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
         state = res.data.state;
         if (state === 'JobComplete') return;
@@ -89,7 +95,7 @@ async function downloadResults(jobId) {
         responseType: 'stream'
     });
 
-    const tempFilePath = path.join(__dirname, `temp.csv`);
+    const tempFilePath = path.join(__dirname, `temp_${jobId}.csv`);
     const writer = fs.createWriteStream(tempFilePath);
     res.data.pipe(writer);
     return new Promise((resolve, reject) => {
@@ -100,7 +106,14 @@ async function downloadResults(jobId) {
 
 async function cleanCSV(filePath) {
     const outputPath = filePath.replace('.csv', '_clean.csv');
-    const parser = fs.createReadStream(filePath).pipe(parse({ columns: true }));
+    const parser = fs.createReadStream(filePath).pipe(parse({
+        columns: true,
+        relax_quotes: true,
+        skip_empty_lines: true,
+        relax_column_count: true,
+        skip_records_with_error: true
+    }));
+
     const writer = fs.createWriteStream(outputPath);
     const stringifier = stringify({ header: true });
 
@@ -110,6 +123,11 @@ async function cleanCSV(filePath) {
     });
 
     parser.on('end', () => stringifier.end());
+    parser.on('error', err => {
+        console.error(`CSV Parse Error: ${err.message}`);
+        writer.destroy();
+    });
+
     stringifier.pipe(writer);
 
     return new Promise((resolve, reject) => {
@@ -137,23 +155,26 @@ async function insertCSVToPostgres(filePath, objectName) {
     const client = new Client(PG_CONFIG);
     await client.connect();
 
-    const headers = await new Promise((resolve, reject) => {
-        fs.createReadStream(filePath).pipe(csv()).on('headers', resolve).on('error', reject);
-    });
+    try {
+        const headers = await new Promise((resolve, reject) => {
+            fs.createReadStream(filePath).pipe(csv()).on('headers', resolve).on('error', reject);
+        });
 
-    await createTable(client, objectName, headers);
+        await createTable(client, objectName, headers);
 
-    const copySQL = `COPY "${objectName}" (${headers.map(h => `"${h}"`).join(', ')}) FROM STDIN WITH CSV HEADER`;
-    const stream = client.query(copyFrom(copySQL));
-    fs.createReadStream(filePath).pipe(stream);
+        const copySQL = `COPY "${objectName}" (${headers.map(h => `"${h}"`).join(', ')}) FROM STDIN WITH CSV HEADER`;
+        const stream = client.query(copyFrom(copySQL));
+        fs.createReadStream(filePath).pipe(stream);
 
-    await new Promise((resolve, reject) => {
-        stream.on('finish', resolve);
-        stream.on('error', reject);
-    });
+        await new Promise((resolve, reject) => {
+            stream.on('finish', resolve);
+            stream.on('error', reject);
+        });
 
-    await client.end();
-    return headers.length;
+        return headers.length; // ✅ Returning count
+    } finally {
+        await client.end();
+    }
 }
 
 async function logBackup({ objectName, recordCount, status, error }) {
@@ -192,26 +213,28 @@ async function backupObject(objectName) {
         const cleanPath = await cleanCSV(rawPath);
 
         try {
-            const count = await insertCSVToPostgres(cleanPath, objectName);
-            await logBackup({ objectName, recordCount: count, status: 'Success' });
-            fs.unlinkSync(rawPath); // ✅ Delete on success
-            fs.unlinkSync(cleanPath);
+            const recordCount = await insertCSVToPostgres(cleanPath, objectName);
+            await logBackup({ objectName, recordCount, status: 'Success' });
+
+            try { fs.unlinkSync(rawPath); } catch (e) { console.warn(`⚠️ Could not delete raw file: ${rawPath}`); }
+            try { fs.unlinkSync(cleanPath); } catch (e) { console.warn(`⚠️ Could not delete clean file: ${cleanPath}`); }
+
             console.log(`✅ Success: ${objectName}`);
         } catch (insertErr) {
-            console.error(`⚠️ Insert failed: ${objectName}`);
+            console.error(`⚠️ Insert failed: ${objectName}: ${insertErr.message}`);
             await logBackup({ objectName, recordCount: 0, status: 'Failed', error: insertErr.message });
         }
     } catch (err) {
-        console.warn(`❌ Failed: ${objectName}:`, err.message);
+        console.warn(`❌ Failed: ${objectName}: ${err.message}`);
         await logBackup({ objectName, recordCount: 0, status: 'Failed', error: err.message });
     }
 }
 
-// === Run All with Concurrency ===
+// === RUN ALL ===
 (async () => {
     try {
         const objectNames = await getAllObjectNames();
-        const limit = pLimit(5); // ⏱️ Max 5 at once
+        const limit = pLimit(1); // Sequential; increase to 5+ if needed
 
         await Promise.all(objectNames.map(name => limit(() => backupObject(name))));
         console.log('\n🎉 All backups completed!');
