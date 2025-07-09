@@ -1,0 +1,31 @@
+name: Salesforce to PostgreSQL Backup
+
+on:
+  schedule:
+    - cron: '40 8 * * *'  # Runs daily at 2:10 PM IST (8:40 AM UTC)
+  workflow_dispatch:      # Allows manual run
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Run Backup Script
+        env:
+          ACCESS_TOKEN: ${{ secrets.SF_ACCESS_TOKEN }}
+          INSTANCE_URL: ${{ secrets.SF_INSTANCE_URL }}
+          PG_HOST: ${{ secrets.PG_HOST }}
+          PG_DATABASE: ${{ secrets.PG_DATABASE }}
+          PG_USER: ${{ secrets.PG_USER }}
+          PG_PASSWORD: ${{ secrets.PG_PASSWORD }}
+        run: node bulkToPostgres.js

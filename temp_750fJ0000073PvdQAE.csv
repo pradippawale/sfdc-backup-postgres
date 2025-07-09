@@ -1,6 +1,0 @@
-"Id","DurableId","AuraDefinitionBundleId","ApiVersion","DeveloperName","NamespacePrefix"
-"000000000000000AAA","c.setExpId","0AbfJ0000007VVJ","62.0","setExpId",""
-"000000000000000AAA","c.setStartUrl","0AbfJ0000007VVK","62.0","setStartUrl",""
-"000000000000000AAA","c.loginForm","0AbfJ0000007VWv","62.0","loginForm",""
-"000000000000000AAA","c.selfRegister","0AbfJ0000007VWw","62.0","selfRegister",""
-"000000000000000AAA","c.forgotPassword","0AbfJ0000007VWx","62.0","forgotPassword",""
