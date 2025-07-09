@@ -1,0 +1,109 @@
+"Id","DurableId","AuraDefinitionBundleInfoId","AuraDefinitionId","DefType","Format","Source","LastModifiedDate","DeveloperName","NamespacePrefix"
+"000000000000000AAA","c.setExpId.EVENT","0AbfJ0000007VVJ","0AdfJ000000B3dh","EVENT","XML","<aura:event type=""APPLICATION"">
+    <aura:attribute name=""expid"" type=""String""/>  
+</aura:event>","2025-01-09T09:00:13.000Z","setExpId",""
+"000000000000000AAA","c.setStartUrl.EVENT","0AbfJ0000007VVK","0AdfJ000000B3di","EVENT","XML","<aura:event type=""APPLICATION"">
+    <aura:attribute name=""startURL"" type=""Map""/>  
+</aura:event>","2025-01-09T09:00:13.000Z","setStartUrl",""
+"000000000000000AAA","c.loginForm.COMPONENT","0AbfJ0000007VWv","0AdfJ000000B3fJ","COMPONENT","XML","<!-- add implements=""forceCommunity:availableForAllPageTypes"" to surface the component in community builder -->
+<aura:component controller=""LightningLoginFormController"">
+    <aura:attribute name=""showError"" type=""Boolean"" required=""true"" descrip","2025-01-09T09:00:14.000Z","loginForm",""
+"000000000000000AAA","c.loginForm.CONTROLLER","0AbfJ0000007VWv","0AdfJ000000B3fK","CONTROLLER","JS","({
+    initialize: function(component, event, helper) {
+        $A.get(""e.siteforce:registerQueryEventMap"").setParams({""qsToEvent"" : helper.qsToEventMap}).fire();    
+        $A.get(""e.siteforce:registerQueryEventMap"").setParams({""qsToEvent"" : helper.qsTo","2025-01-09T09:00:14.000Z","loginForm",""
+"000000000000000AAA","c.loginForm.HELPER","0AbfJ0000007VWv","0AdfJ000000B3fL","HELPER","JS","({
+    
+    qsToEventMap: {
+        'startURL'  : 'e.c:setStartUrl'
+    },
+
+    qsToEventMap2: {
+        'expid'  : 'e.c:setExpId'
+    },
+    
+    handleLogin: function (component, event, helpler) {","2025-01-09T09:00:14.000Z","loginForm",""
+"000000000000000AAA","c.loginForm.STYLE","0AbfJ0000007VWv","0AdfJ000000B3fM","STYLE","CSS",".THIS #sfdc_username_container{
+    margin-bottom:10px;
+    padding: 12px;
+    background-color:white;
+    border: 1px solid #CCC;
+    -webkit-border-radius: 2px;
+    -moz-border-radius: 2px;
+    border-radius: 2px;
+}
+
+.THIS #sfdc_user{
+    float:left;","2025-01-09T09:00:14.000Z","loginForm",""
+"000000000000000AAA","c.loginForm.DESIGN","0AbfJ0000007VWv","0AdfJ000000B3fN","DESIGN","XML","<design:component label=""Custom Login Form"">
+    <design:attribute name=""startUrl""/>
+    <design:attribute name=""usernameLabel"" default=""Email""/>
+    <design:attribute name=""passwordLabel"" default=""Password""/>
+    <design:attribute name=""loginButtonLabel""","2025-01-09T09:00:14.000Z","loginForm",""
+"000000000000000AAA","c.selfRegister.COMPONENT","0AbfJ0000007VWw","0AdfJ000000B3fO","COMPONENT","XML","<!-- add implements=""forceCommunity:availableForAllPageTypes"" to surface the component in community builder -->
+<aura:component controller=""LightningSelfRegisterController"">
+    <aura:attribute name=""accountId"" type=""String"" required=""false"" descrip","2025-01-09T09:00:15.000Z","selfRegister",""
+"000000000000000AAA","c.selfRegister.CONTROLLER","0AbfJ0000007VWw","0AdfJ000000B3fP","CONTROLLER","JS","({
+    initialize: function(component, event, helper) {
+        $A.get(""e.siteforce:registerQueryEventMap"").setParams({""qsToEvent"" : helper.qsToEventMap}).fire();
+        $A.get(""e.siteforce:registerQueryEventMap"").setParams({""qsToEvent"" : helper.qsToEven","2025-01-09T09:00:15.000Z","selfRegister",""
+"000000000000000AAA","c.selfRegister.HELPER","0AbfJ0000007VWw","0AdfJ000000B3fQ","HELPER","JS","({
+    qsToEventMap: {
+        'startURL'  : 'e.c:setStartUrl'
+    },
+    
+    qsToEventMap2: {
+        'expid'  : 'e.c:setExpId'
+    },
+    
+    handleSelfRegister: function (component, event, help","2025-01-09T09:00:15.000Z","selfRegister",""
+"000000000000000AAA","c.selfRegister.STYLE","0AbfJ0000007VWw","0AdfJ000000B3fR","STYLE","CSS",".THIS #sfdc_username_container{
+    margin-bottom:10px;
+    padding: 12px;
+    background-color:white;
+    border: 1px solid #CCC;
+    -webkit-border-radius: 2px;
+    -moz-border-radius: 2px;
+    border-radius: 2px;
+}
+
+.THIS #sfdc_nickname_container{","2025-01-09T09:00:15.000Z","selfRegister",""
+"000000000000000AAA","c.selfRegister.DESIGN","0AbfJ0000007VWw","0AdfJ000000B3fS","DESIGN","XML","<design:component label=""Custom Self Register"">
+    <design:attribute name=""startUrl""/>
+    <design:attribute name=""regConfirmUrl"" default=""./CheckPasswordResetEmail""/>
+    <design:attribute name=""firstnameLabel"" default=""First Name""/>
+    <design:attribu","2025-01-09T09:00:15.000Z","selfRegister",""
+"000000000000000AAA","c.forgotPassword.COMPONENT","0AbfJ0000007VWx","0AdfJ000000B3fT","COMPONENT","XML","<!-- add implements=""forceCommunity:availableForAllPageTypes"" to surface the component in community builder -->
+<aura:component controller=""LightningForgotPasswordController"">
+    <aura:attribute name=""usernameLabel"" type=""String"" required=""false"" def","2025-01-09T09:00:15.000Z","forgotPassword",""
+"000000000000000AAA","c.forgotPassword.CONTROLLER","0AbfJ0000007VWx","0AdfJ000000B3fU","CONTROLLER","JS","({
+    handleForgotPassword: function (component, event, helpler) {
+        helpler.handleForgotPassword(component, event, helpler);
+    },
+    onKeyUp: function(component, event, helpler){
+    //checks for ""enter"" key
+        if (event.getParam('keyCode'","2025-01-09T09:00:15.000Z","forgotPassword",""
+"000000000000000AAA","c.forgotPassword.HELPER","0AbfJ0000007VWx","0AdfJ000000B3fV","HELPER","JS","({
+    qsToEventMap: {
+        'expid'  : 'e.c:setExpId'
+    },
+    
+    handleForgotPassword: function (component, event, helpler) {
+        var username = component.find(""username"").get(""v.value"");
+        var checkEmailUrl","2025-01-09T09:00:15.000Z","forgotPassword",""
+"000000000000000AAA","c.forgotPassword.STYLE","0AbfJ0000007VWx","0AdfJ000000B3fW","STYLE","CSS",".THIS #sfdc_username_container{
+    margin-bottom:10px;
+    padding: 12px;
+    background-color:white;
+    border: 1px solid #CCC;
+    -webkit-border-radius: 2px;
+    -moz-border-radius: 2px;
+    border-radius: 2px;
+}
+
+.THIS #sfdc_user{
+    float:left;","2025-01-09T09:00:15.000Z","forgotPassword",""
+"000000000000000AAA","c.forgotPassword.DESIGN","0AbfJ0000007VWx","0AdfJ000000B3fX","DESIGN","XML","<design:component label=""Custom Forgot Password"">
+    <design:attribute name=""checkEmailUrl"" default=""./CheckPasswordResetEmail""/>
+    <design:attribute name=""usernameLabel"" default=""Username""/>
+    <design:attribute name=""submitButtonLabel"" default=""Rese","2025-01-09T09:00:15.000Z","forgotPassword",""
