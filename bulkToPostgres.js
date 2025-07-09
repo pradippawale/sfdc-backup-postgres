@@ -9,8 +9,8 @@ const { stringify } = require('csv-stringify');
 const pLimit = require('p-limit'); // ✅ Works with version 2
 
 // === CONFIGURATION ===
-const ACCESS_TOKEN = process.env.SF_ACCESS_TOKEN;
-const INSTANCE_URL = process.env.SF_INSTANCE_URL;
+const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
+const INSTANCE_URL = process.env.INSTANCE_URL;
 const API_VERSION = 'v60.0';
 
 const PG_CONFIG = {
