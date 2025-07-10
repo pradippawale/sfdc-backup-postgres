@@ -1,4 +1,3 @@
-// === Imports ===
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
@@ -14,17 +13,21 @@ const delay = ms => new Promise(res => setTimeout(res, ms));
 let FIELD_TYPES_MAP = {};
 
 // === Configuration ===
-const ACCESS_TOKEN = '00DfJ000002QrbH!AQEAQF11EjB.Nx5.rHXQ.V_sRksazBynBhfC8ZbWl1S1aG0gNez_MutGGqYWA1om43NswEtuBgljHJgp1uwErLd_SlNgFB_i';
+const ACCESS_TOKEN = '00DfJ000002QrbH!AQEAQEaZ8jPe73YZ3z4eTm1C8XqVkbDUnP5RLMWBW.Hhlm9Nog9z83W.stfFm3oa7aoJVAt1NkxBf8D3_IUYjBB.3NH3juNk';
 const INSTANCE_URL = 'https://coresolute4-dev-ed.develop.my.salesforce.com';
 const API_VERSION = 'v60.0';
 
 const PG_CONFIG = {
-    host: 'dpg-d1i3u8fdiees73cf0dug-a.oregon-postgres.render.com',
-    port: 5432,
-    database: 'sfdatabase_34oi',
-    user: 'sfdatabaseuser',
-    password: 'D898TUsAal4ksBUs5QoQffxMZ6MY5aAH',
-    ssl: { rejectUnauthorized: false }
+  host: 'dpg-d1i3u8fdiees73cf0dug-a.oregon-postgres.render.com',
+  port: 5432,
+  database: 'sfdatabase_34oi',
+  user: 'sfdatabaseuser',
+  password: 'D898TUsAal4ksBUs5QoQffxMZ6MY5aAH',
+  ssl: {
+    rejectUnauthorized: false,
+    require: true
+  },
+  keepAlive: true
 };
 
 // === Salesforce Helpers ===
