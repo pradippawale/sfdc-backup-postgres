@@ -270,6 +270,7 @@ async function logBackup({ objectName, recordCount, status, error, csvFilePath }
 }
 
 async function backupObject(objectName) {
+  let rawPath, cleanPath;
   try {
     const hasData = await hasRecords(objectName);
     if (!hasData) {
@@ -282,18 +283,26 @@ async function backupObject(objectName) {
     const soql = `SELECT ${fields.join(', ')} FROM ${objectName}`;
     const job = await createBulkQueryJob(soql);
     await pollJob(job.id);
-    const rawPath = await downloadResults(job.id);
-    const cleanPath = await cleanCSV(rawPath);
+    rawPath = await downloadResults(job.id);
+    cleanPath = await cleanCSV(rawPath);
 
     const recordCount = await insertCSVToPostgres(cleanPath, objectName);
+
+    // 🚨 Pass CSV path for log attachment
     await logBackup({ objectName, recordCount, status: 'Success', csvFilePath: cleanPath });
 
-    fs.unlinkSync(rawPath);
-    fs.unlinkSync(cleanPath);
     console.log(`✅ Success: ${objectName}`);
   } catch (err) {
     console.warn(`❌ Failed: ${objectName}: ${err.message}`);
     await logBackup({ objectName, recordCount: 0, status: 'Failed', error: err.message });
+  } finally {
+    // 🔁 Delete files in finally block after all steps
+    try {
+      if (rawPath && fs.existsSync(rawPath)) fs.unlinkSync(rawPath);
+      if (cleanPath && fs.existsSync(cleanPath)) fs.unlinkSync(cleanPath);
+    } catch (err) {
+      console.warn(`⚠️ Failed to delete temp files: ${err.message}`);
+    }
   }
 }
 
