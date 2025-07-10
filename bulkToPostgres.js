@@ -37,7 +37,18 @@ async function getAllObjectNames() {
     .map(o => o.name);
 }
 
-// (Other helper functions such as hasRecords, getAllFields, etc. remain unchanged)
+async function hasRecords(objectName) {
+  try {
+    const q = encodeURIComponent(`SELECT count() FROM ${objectName}`);
+    const url = `${INSTANCE_URL}/services/data/${API_VERSION}/query?q=${q}`;
+    const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
+    return res.data.totalSize > 0;
+  } catch {
+    return false;
+  }
+}
+
+// (Other helper functions such as getAllFields, createBulkQueryJob, etc. remain unchanged)
 
 async function logBackup({ objectName, recordCount, status, error, csvFilePath }) {
   const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects/Backup_Log__c`;
