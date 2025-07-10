@@ -203,5 +203,39 @@ async function insertCSVToPostgres(filePath, objectName) {
   }
 }
 
-// === LOGGING and BACKUP === (unchanged from previous version)
-// === EXPRESS SERVER (unchanged) ===
+// === Main execution block ===
+(async () => {
+  try {
+    const objectNames = await getAllObjectNames();
+    console.log(`📦 Total objects to backup: ${objectNames.length}`);
+
+    for (let i = 0; i < objectNames.length; i++) {
+      const objectName = objectNames[i];
+      console.log(`🔄 (${i + 1}/${objectNames.length}) Processing ${objectName}`);
+
+      const hasData = await hasRecords(objectName);
+      if (!hasData) {
+        console.log(`⏭️ Skipped: ${objectName}`);
+        continue;
+      }
+
+      const fields = await getAllFields(objectName);
+      const soql = `SELECT ${fields.join(', ')} FROM ${objectName}`;
+
+      const job = await createBulkQueryJob(soql);
+      await pollJob(job.id);
+      const rawPath = await downloadResults(job.id);
+      const cleanPath = await cleanCSV(rawPath);
+
+      const count = await insertCSVToPostgres(cleanPath, objectName);
+      console.log(`✅ ${objectName} inserted (${count} records)`);
+
+      fs.unlinkSync(rawPath);
+      fs.unlinkSync(cleanPath);
+    }
+
+    console.log('🎉 All object backups completed.');
+  } catch (err) {
+    console.error('❌ Fatal error:', err.message);
+  }
+})();
