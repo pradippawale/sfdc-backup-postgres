@@ -39,9 +39,21 @@ function mapSFTypeToPostgres(sfType) {
 
 async function getAllObjectNames() {
   const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects`;
-  const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
+  const res = await axios.get(url, {
+    headers: { Authorization: `Bearer ${ACCESS_TOKEN}` }
+  });
+
   return res.data.sobjects
-    .filter(o => o.queryable && !o.name.endsWith('__Share') && !o.name.endsWith('__Tag'))
+    .filter(o =>
+      o.queryable &&
+      !o.name.endsWith('__Share') &&
+      !o.name.endsWith('__Tag') &&
+      !o.name.endsWith('__History') &&
+      !o.name.endsWith('__Feed') &&
+      !o.name.includes('ChangeEvent') &&
+      !o.name.toLowerCase().includes('permissionsetgroup') &&
+      !o.name.toLowerCase().includes('recordtype')
+    )
     .map(o => o.name);
 }
 
