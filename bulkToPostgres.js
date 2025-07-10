@@ -1,3 +1,4 @@
+// === Imports ===
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
@@ -28,7 +29,15 @@ const PG_CONFIG = {
 };
 
 // === Salesforce Helpers ===
-// ... All other helper functions remain unchanged
+async function getAllObjectNames() {
+  const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects`;
+  const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
+  return res.data.sobjects
+    .filter(o => o.queryable && !o.name.endsWith('__Share') && !o.name.endsWith('__Tag'))
+    .map(o => o.name);
+}
+
+// (Other helper functions such as hasRecords, getAllFields, etc. remain unchanged)
 
 async function logBackup({ objectName, recordCount, status, error, csvFilePath }) {
   const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects/Backup_Log__c`;
