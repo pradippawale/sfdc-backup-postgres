@@ -10,6 +10,7 @@ const { parse } = require('csv-parse');
 const { stringify } = require('csv-stringify');
 const pLimit = require('p-limit');
 
+// === Utils ===
 const delay = ms => new Promise(res => setTimeout(res, ms));
 let FIELD_TYPES_MAP = {};
 
@@ -28,6 +29,7 @@ const PG_CONFIG = {
   keepAlive: true
 };
 
+// === Helper Functions ===
 function mapSFTypeToPostgres(sfType) {
   const map = {
     string: 'TEXT', picklist: 'TEXT', textarea: 'TEXT', email: 'TEXT', id: 'TEXT',
@@ -39,9 +41,7 @@ function mapSFTypeToPostgres(sfType) {
 
 async function getAllObjectNames() {
   const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects`;
-  const res = await axios.get(url, {
-    headers: { Authorization: `Bearer ${ACCESS_TOKEN}` }
-  });
+  const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
 
   return res.data.sobjects
     .filter(o =>
@@ -53,7 +53,7 @@ async function getAllObjectNames() {
       !o.name.includes('ChangeEvent') &&
       !o.name.toLowerCase().includes('permissionsetgroup') &&
       !o.name.toLowerCase().includes('recordtype') &&
-      !o.name.toLowerCase().includes('recordAlerttemplatelocalization')
+      !o.name.toLowerCase().includes('recordalerttemplatelocalization')
     )
     .map(o => o.name);
 }
@@ -269,7 +269,6 @@ async function logBackup({ objectName, recordCount, status, error, csvFilePath }
   }
 }
 
-// === Backup each object ===
 async function backupObject(objectName) {
   try {
     const hasData = await hasRecords(objectName);
@@ -304,18 +303,25 @@ app.use(express.json());
 
 app.get('/', (_, res) => res.send('✅ Salesforce Backup Service Running.'));
 
+// ✅ FIXED: Respond immediately, run backup in background
 app.post('/api/backup', async (req, res) => {
   try {
     const inputList = req.body.objectNames || [];
     const allObjects = await getAllObjectNames();
-    const selected = inputList.length ? allObjects.filter(o => inputList.includes(o)) : allObjects;
+    const selected = inputList.length
+      ? allObjects.filter(o => inputList.includes(o))
+      : allObjects;
 
-    const limit = pLimit(1);
-    for (let i = 0; i < selected.length; i++) {
-      await limit(() => backupObject(selected[i]));
-    }
+    res.json({ message: '✅ Backup started in background.', objects: selected });
 
-    res.json({ message: '✅ Backup completed.', objects: selected });
+    // Background backup
+    process.nextTick(async () => {
+      const limit = pLimit(1);
+      for (let i = 0; i < selected.length; i++) {
+        await limit(() => backupObject(selected[i]));
+      }
+    });
+
   } catch (err) {
     console.error('❌ API Error:', err.message);
     res.status(500).json({ error: err.message });
