@@ -52,7 +52,8 @@ async function getAllObjectNames() {
       !o.name.endsWith('__Feed') &&
       !o.name.includes('ChangeEvent') &&
       !o.name.toLowerCase().includes('permissionsetgroup') &&
-      !o.name.toLowerCase().includes('recordtype')
+      !o.name.toLowerCase().includes('recordtype') &&
+      !o.name.toLowerCase().includes('recordAlerttemplatelocalization')
     )
     .map(o => o.name);
 }
