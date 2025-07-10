@@ -48,7 +48,22 @@ async function hasRecords(objectName) {
   }
 }
 
-// (Other helper functions such as getAllFields, createBulkQueryJob, etc. remain unchanged)
+async function getAllFields(objectName) {
+  const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects/${objectName}/describe`;
+  const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
+
+  FIELD_TYPES_MAP = {};
+  const unsupported = ['address', 'location', 'base64', 'json'];
+
+  return res.data.fields
+    .filter(f => !unsupported.includes(f.type) && !f.compoundFieldName)
+    .map(f => {
+      FIELD_TYPES_MAP[f.name] = f.type;
+      return f.name;
+    });
+}
+
+// (Other helper functions such as createBulkQueryJob, pollJob, downloadResults, cleanCSV, insertCSVToPostgres remain unchanged)
 
 async function logBackup({ objectName, recordCount, status, error, csvFilePath }) {
   const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects/Backup_Log__c`;
