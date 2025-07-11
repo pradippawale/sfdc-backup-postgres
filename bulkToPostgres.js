@@ -15,7 +15,7 @@ const delay = ms => new Promise(res => setTimeout(res, ms));
 let FIELD_TYPES_MAP = {};
 
 // === Configuration ===
-const ACCESS_TOKEN = '00DfJ000002QrbH!AQEAQEaZ8jPe73YZ3z4eTm1C8XqVkbDUnP5RLMWBW.Hhlm9Nog9z83W.stfFm3oa7aoJVAt1NkxBf8D3_IUYjBB.3NH3juNk';
+const ACCESS_TOKEN = '00DfJ000002QrbH!AQEAQAKuWf9reAXtxwNcs7C1kkIGs06BZfHwpalWftoV8RKaT.MAV6DLDIbs5UFxYvrPRubcYvNc6NCI4m6nGW6QdTzlgxBi';
 const INSTANCE_URL = 'https://coresolute4-dev-ed.develop.my.salesforce.com';
 const API_VERSION = 'v60.0';
 
