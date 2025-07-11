@@ -169,36 +169,50 @@ async function insertCSVToPostgres(filePath, objectName) {
   const client = new Client(PG_CONFIG);
   await client.connect();
 
+  const tempTable = `"${objectName}_temp"`;
+
   try {
     const headers = await new Promise((resolve, reject) => {
       fs.createReadStream(filePath).pipe(csv()).on('headers', resolve).on('error', reject);
     });
 
+    // 1. Create main table if not exists
     await createTable(client, objectName, headers);
 
-    const copySQL = `COPY "${objectName}" (${headers.map(h => `"${h}"`).join(', ')}) FROM STDIN WITH CSV HEADER NULL '\\N'`;
+    // 2. Drop and recreate temp table
+    await client.query(`DROP TABLE IF EXISTS ${tempTable};`);
+    await client.query(`CREATE TEMP TABLE ${tempTable} AS SELECT * FROM "${objectName}" WITH NO DATA;`);
+
+    // 3. COPY into temp table
+    const copySQL = `COPY ${tempTable} (${headers.map(h => `"${h}"`).join(', ')}) FROM STDIN WITH CSV HEADER NULL '\\N'`;
     const stream = client.query(copyFrom(copySQL));
     fs.createReadStream(filePath).pipe(stream);
-
     await new Promise((resolve, reject) => {
       stream.on('finish', resolve);
       stream.on('error', reject);
     });
 
-    const rowCount = await new Promise((resolve, reject) => {
-      let count = 0;
-      fs.createReadStream(filePath)
-        .pipe(csv())
-        .on('data', () => count++)
-        .on('end', () => resolve(count))
-        .on('error', reject);
-    });
+    // 4. UPSERT into main table from temp table
+    const upsertSQL = `
+      INSERT INTO "${objectName}" (${headers.map(h => `"${h}"`).join(', ')})
+      SELECT ${headers.map(h => `"${h}"`).join(', ')} FROM ${tempTable}
+      ON CONFLICT ("Id") DO UPDATE SET
+      ${headers
+        .filter(h => h !== 'Id')
+        .map(h => `"${h}" = EXCLUDED."${h}"`)
+        .join(', ')};
+    `;
+    await client.query(upsertSQL);
 
-    return rowCount;
+    // 5. Return count of rows in temp table (imported/updated)
+    const result = await client.query(`SELECT COUNT(*) FROM ${tempTable};`);
+    return parseInt(result.rows[0].count, 10);
+
   } finally {
     await client.end();
   }
 }
+
 
 async function logBackup({ objectName, recordCount, status, error, csvFilePath }) {
   const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects/Backup_Log__c`;
