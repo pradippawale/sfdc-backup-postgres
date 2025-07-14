@@ -16,7 +16,7 @@ let FIELD_TYPES_MAP = {};
 
 // === Config ===
 // === Configuration ===
-const ACCESS_TOKEN = '00DfJ000002QrbH!AQEAQAKuWf9reAXtxwNcs7C1kkIGs06BZfHwpalWftoV8RKaT.MAV6DLDIbs5UFxYvrPRubcYvNc6NCI4m6nGW6QdTzlgxBi';
+const ACCESS_TOKEN = '00DfJ000002QrbH!AQEAQCguWQ87WidUu3Hg2ai3eckdmmk5NSbm6IQJmhposdCtDzjXRFgzUvKrgFsomJggYUCOYIaMzPtsVf4GKkmz.kA5hSCu';
 const INSTANCE_URL = 'https://coresolute4-dev-ed.develop.my.salesforce.com';
 const API_VERSION = 'v60.0';
 
