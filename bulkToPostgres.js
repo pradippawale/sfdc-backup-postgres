@@ -39,6 +39,24 @@ function mapSFTypeToPostgres(sfType) {
   return map[sfType.toLowerCase()] || 'TEXT';
 }
 
+async function ensureBackupLogsTableExists() {
+  const client = new Client(PG_CONFIG);
+  await client.connect();
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS backup_logs (
+        id SERIAL PRIMARY KEY,
+        object_name TEXT,
+        record_count INTEGER,
+        backup_type TEXT,
+        backup_time TIMESTAMP DEFAULT NOW()
+      );
+    `);
+  } finally {
+    await client.end();
+  }
+}
+
 async function getAllObjectNames() {
   const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects`;
   const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
@@ -133,6 +151,12 @@ async function getLastBackupTime(objectName) {
   const client = new Client(PG_CONFIG);
   await client.connect();
   try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS last_backup (
+        object_name TEXT PRIMARY KEY,
+        last_run TIMESTAMP
+      );
+    `);
     const res = await client.query('SELECT last_run FROM last_backup WHERE object_name = $1', [objectName]);
     return res.rows[0]?.last_run || null;
   } finally {
@@ -144,15 +168,6 @@ async function setLastBackupTime(objectName) {
   const client = new Client(PG_CONFIG);
   await client.connect();
   try {
-    // Run CREATE TABLE separately
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS last_backup (
-        object_name TEXT PRIMARY KEY,
-        last_run TIMESTAMP
-      );
-    `);
-
-    // Then run INSERT/UPSERT separately
     await client.query(`
       INSERT INTO last_backup (object_name, last_run)
       VALUES ($1, NOW())
@@ -164,6 +179,18 @@ async function setLastBackupTime(objectName) {
   }
 }
 
+async function logBackup(objectName, count, type) {
+  const client = new Client(PG_CONFIG);
+  await client.connect();
+  try {
+    await client.query(`
+      INSERT INTO backup_logs (object_name, record_count, backup_type)
+      VALUES ($1, $2, $3);
+    `, [objectName, count, type]);
+  } finally {
+    await client.end();
+  }
+}
 
 async function hasRecentChangesSince(objectName, sinceTimestamp) {
   const formatted = sinceTimestamp.toISOString();
@@ -197,7 +224,7 @@ async function pollJob(jobId, timeout = 5 * 60 * 1000) {
     const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
     state = res.data.state;
     if (state === 'JobComplete') return;
-    if (['Failed', 'Aborted'].includes(state)) throw new Error(`Job ${state}`);
+    if (["Failed", "Aborted"].includes(state)) throw new Error(`Job ${state}`);
     await delay(4000);
   }
 }
@@ -255,12 +282,12 @@ async function backupObject(objectName, isIncremental = false) {
     if (isIncremental) {
       const lastTime = await getLastBackupTime(objectName);
       if (lastTime && fields.includes('LastModifiedDate')) {
-        const timestamp = lastTime.toISOString();
         const changed = await hasRecentChangesSince(objectName, lastTime);
         if (!changed) {
           console.log(`⏭️ Skipped (no changes): ${objectName}`);
           return;
         }
+        const timestamp = lastTime.toISOString();
         soql += ` WHERE LastModifiedDate > ${timestamp}`;
       }
     }
@@ -272,6 +299,7 @@ async function backupObject(objectName, isIncremental = false) {
 
     const recordCount = await insertCSVToPostgres(cleanPath, objectName);
     await setLastBackupTime(objectName);
+    await logBackup(objectName, recordCount, isIncremental ? 'incremental' : 'full');
 
     console.log(`✅ Success: ${objectName} (${recordCount} records)`);
   } catch (err) {
@@ -290,6 +318,8 @@ app.post('/api/backup', async (req, res) => {
   try {
     const inputList = req.body.objectNames || [];
     const isIncremental = req.body.incremental || false;
+
+    await ensureBackupLogsTableExists();
 
     const allObjects = await getAllObjectNames();
     const selected = inputList.length ? allObjects.filter(o => inputList.includes(o)) : allObjects;
