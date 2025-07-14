@@ -160,18 +160,12 @@ async function insertToPostgres(cleanPath, objectName) {
   });
 
   const columnDefs = headers.map(h => `"${h}" TEXT`).join(', ');
-  await client.query(`
-    DO $$
-    BEGIN
-      IF NOT EXISTS (
-        SELECT 1 FROM information_schema.tables 
-        WHERE table_name = '${objectName.toLowerCase()}'
-      ) THEN
-        EXECUTE 'CREATE TABLE "${objectName}" (${columnDefs}, UNIQUE ("Id"))';
-      END IF;
-    END
-    $$;
-  `);
+await client.query(`
+  CREATE TABLE IF NOT EXISTS "${objectName}" (
+    ${headers.map(h => `"${h}" TEXT`).join(', ')},
+    UNIQUE ("Id")
+  );
+`);
 
   const tempTable = `"${objectName}_temp"`;
   await client.query(`DROP TABLE IF EXISTS ${tempTable}`);
