@@ -178,37 +178,54 @@ async function insertToPostgres(cleanPath, objectName) {
     });
 
     // Check if table exists
-    const tableExists = await client.query(
-      `SELECT to_regclass($1) AS exists;`,
-      [`"${objectName}"`]
+    const tableExistsCheck = await client.query(
+      `SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' AND table_name = $1
+      )`, [objectName.toLowerCase()]
     );
 
-    // If table does not exist, create it with PRIMARY KEY on Id
-    if (!tableExists.rows[0].exists) {
-      await client.query(`
-        CREATE TABLE "${objectName}" (
-          ${headers.map(h => `"${h}" TEXT`).join(', ')},
-          PRIMARY KEY ("Id")
-        );
-      `);
+    const tableExists = tableExistsCheck.rows[0].exists;
+
+    // If table doesn't exist, create it with PRIMARY KEY on Id
+    if (!tableExists) {
+      const columnsDef = headers.map(h => `"${h}" TEXT`).join(', ');
+      const pkConstraint = headers.includes('Id') ? ', PRIMARY KEY ("Id")' : '';
+      const createSQL = `CREATE TABLE "${objectName}" (${columnsDef}${pkConstraint});`;
+      await client.query(createSQL);
+    } else {
+      // Ensure PRIMARY KEY exists on Id
+      if (headers.includes('Id')) {
+        const pkCheck = await client.query(`
+          SELECT constraint_type 
+          FROM information_schema.table_constraints 
+          WHERE table_name = $1 AND constraint_type = 'PRIMARY KEY'
+        `, [objectName]);
+        if (pkCheck.rows.length === 0) {
+          try {
+            await client.query(`ALTER TABLE "${objectName}" ADD PRIMARY KEY ("Id")`);
+          } catch (err) {
+            console.warn(`⚠️ Couldn't add PRIMARY KEY to ${objectName}. It may already exist or be invalid:`, err.message);
+          }
+        }
+      }
     }
 
-    // Create temp table
+    // Temp table
     const tempTable = `"${objectName}_temp"`;
     await client.query(`DROP TABLE IF EXISTS ${tempTable}`);
     await client.query(`CREATE TEMP TABLE ${tempTable} AS SELECT * FROM "${objectName}" WITH NO DATA`);
 
-    // Copy CSV into temp table
+    // COPY into temp table
     const copySQL = `COPY ${tempTable} (${headers.map(h => `"${h}"`).join(', ')}) FROM STDIN WITH CSV HEADER NULL '\\N'`;
     const stream = client.query(copyFrom(copySQL));
     fs.createReadStream(cleanPath).pipe(stream);
-
     await new Promise((resolve, reject) => {
       stream.on('finish', resolve);
       stream.on('error', reject);
     });
 
-    // Upsert from temp to main table
+    // UPSERT using ON CONFLICT on Id
     const upsertSQL = `
       INSERT INTO "${objectName}" (${headers.map(h => `"${h}"`).join(', ')})
       SELECT ${headers.map(h => `"${h}"`).join(', ')} FROM ${tempTable}
@@ -217,9 +234,8 @@ async function insertToPostgres(cleanPath, objectName) {
     `;
     await client.query(upsertSQL);
 
-    // Count inserted records
-    const res = await client.query(`SELECT COUNT(*) FROM ${tempTable}`);
-    return parseInt(res.rows[0].count);
+    const countRes = await client.query(`SELECT COUNT(*) FROM ${tempTable}`);
+    return parseInt(countRes.rows[0].count);
   } finally {
     await client.end();
   }
