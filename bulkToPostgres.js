@@ -94,6 +94,10 @@ async function setLastBackupTime(objectName) {
   await client.connect();
   try {
     await client.query(`
+      CREATE TABLE IF NOT EXISTS last_backup (
+        object_name TEXT PRIMARY KEY,
+        last_run TIMESTAMP
+      );
       INSERT INTO last_backup (object_name, last_run)
       VALUES ($1, NOW())
       ON CONFLICT (object_name)
@@ -285,3 +289,6 @@ app.post('/api/backup', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
