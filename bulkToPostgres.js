@@ -170,6 +170,8 @@ async function insertToPostgres(cleanPath, objectName) {
   const client = new Client(PG_CONFIG);
   await client.connect();
 
+  const quotedObject = `"${objectName}"`;
+
   try {
     const headers = await new Promise((resolve, reject) => {
       fs.createReadStream(cleanPath).pipe(csv())
@@ -177,46 +179,30 @@ async function insertToPostgres(cleanPath, objectName) {
         .on('error', reject);
     });
 
-    // Check if table exists
+    // Check if table exists (must quote name to preserve case)
     const tableExistsCheck = await client.query(
       `SELECT EXISTS (
         SELECT FROM information_schema.tables 
         WHERE table_schema = 'public' AND table_name = $1
-      )`, [objectName.toLowerCase()]
+      )`, [objectName]
     );
 
     const tableExists = tableExistsCheck.rows[0].exists;
 
     // If table doesn't exist, create it with PRIMARY KEY on Id
     if (!tableExists) {
-      const columnsDef = headers.map(h => `"${h}" TEXT`).join(', ');
-      const pkConstraint = headers.includes('Id') ? ', PRIMARY KEY ("Id")' : '';
-      const createSQL = `CREATE TABLE "${objectName}" (${columnsDef}${pkConstraint});`;
+      const columnDefs = headers.map(h => `"${h}" TEXT`).join(', ');
+      const pk = headers.includes('Id') ? ', PRIMARY KEY ("Id")' : '';
+      const createSQL = `CREATE TABLE ${quotedObject} (${columnDefs}${pk});`;
       await client.query(createSQL);
-    } else {
-      // Ensure PRIMARY KEY exists on Id
-      if (headers.includes('Id')) {
-        const pkCheck = await client.query(`
-          SELECT constraint_type 
-          FROM information_schema.table_constraints 
-          WHERE table_name = $1 AND constraint_type = 'PRIMARY KEY'
-        `, [objectName]);
-        if (pkCheck.rows.length === 0) {
-          try {
-            await client.query(`ALTER TABLE "${objectName}" ADD PRIMARY KEY ("Id")`);
-          } catch (err) {
-            console.warn(`⚠️ Couldn't add PRIMARY KEY to ${objectName}. It may already exist or be invalid:`, err.message);
-          }
-        }
-      }
     }
 
-    // Temp table
-    const tempTable = `"${objectName}_temp"`;
+    // Create temp table
+    const tempTable = `${quotedObject}_temp`;
     await client.query(`DROP TABLE IF EXISTS ${tempTable}`);
-    await client.query(`CREATE TEMP TABLE ${tempTable} AS SELECT * FROM "${objectName}" WITH NO DATA`);
+    await client.query(`CREATE TEMP TABLE ${tempTable} AS SELECT * FROM ${quotedObject} WITH NO DATA`);
 
-    // COPY into temp table
+    // COPY to temp table
     const copySQL = `COPY ${tempTable} (${headers.map(h => `"${h}"`).join(', ')}) FROM STDIN WITH CSV HEADER NULL '\\N'`;
     const stream = client.query(copyFrom(copySQL));
     fs.createReadStream(cleanPath).pipe(stream);
@@ -225,21 +211,23 @@ async function insertToPostgres(cleanPath, objectName) {
       stream.on('error', reject);
     });
 
-    // UPSERT using ON CONFLICT on Id
+    // UPSERT from temp table
     const upsertSQL = `
-      INSERT INTO "${objectName}" (${headers.map(h => `"${h}"`).join(', ')})
+      INSERT INTO ${quotedObject} (${headers.map(h => `"${h}"`).join(', ')})
       SELECT ${headers.map(h => `"${h}"`).join(', ')} FROM ${tempTable}
       ON CONFLICT ("Id") DO UPDATE SET
-      ${headers.filter(h => h !== 'Id').map(h => `"${h}" = EXCLUDED."${h}"`).join(', ')};
+        ${headers.filter(h => h !== 'Id').map(h => `"${h}" = EXCLUDED."${h}"`).join(', ')};
     `;
     await client.query(upsertSQL);
 
     const countRes = await client.query(`SELECT COUNT(*) FROM ${tempTable}`);
     return parseInt(countRes.rows[0].count);
+
   } finally {
     await client.end();
   }
 }
+
 
 async function logBackupToSalesforce(objectName, recordCount, status, cleanPath = null) {
   const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects/Backup_Log__c`;
