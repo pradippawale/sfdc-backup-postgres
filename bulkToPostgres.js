@@ -144,11 +144,16 @@ async function setLastBackupTime(objectName) {
   const client = new Client(PG_CONFIG);
   await client.connect();
   try {
+    // Run CREATE TABLE separately
     await client.query(`
       CREATE TABLE IF NOT EXISTS last_backup (
         object_name TEXT PRIMARY KEY,
         last_run TIMESTAMP
       );
+    `);
+
+    // Then run INSERT/UPSERT separately
+    await client.query(`
       INSERT INTO last_backup (object_name, last_run)
       VALUES ($1, NOW())
       ON CONFLICT (object_name)
@@ -158,6 +163,7 @@ async function setLastBackupTime(objectName) {
     await client.end();
   }
 }
+
 
 async function hasRecentChangesSince(objectName, sinceTimestamp) {
   const formatted = sinceTimestamp.toISOString();
