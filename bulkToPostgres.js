@@ -15,16 +15,16 @@ const delay = ms => new Promise(res => setTimeout(res, ms));
 let FIELD_TYPES_MAP = {};
 
 // === Configuration ===
-const ACCESS_TOKEN = '00DfJ000002QrbH!AQEAQCguWQ87WidUu3Hg2ai3eckdmmk5NSbm6IQJmhposdCtDzjXRFgzUvKrgFsomJggYUCOYIaMzPtsVf4GKkmz.kA5hSCu';
-const INSTANCE_URL = 'https://coresolute4-dev-ed.develop.my.salesforce.com';
+const ACCESS_TOKEN = 'your_token_here';
+const INSTANCE_URL = 'https://your-instance.salesforce.com';
 const API_VERSION = 'v60.0';
 
 const PG_CONFIG = {
-  host: 'dpg-d1i3u8fdiees73cf0dug-a.oregon-postgres.render.com',
+  host: 'your-host',
   port: 5432,
-  database: 'sfdatabase_34oi',
-  user: 'sfdatabaseuser',
-  password: 'D898TUsAal4ksBUs5QoQffxMZ6MY5aAH',
+  database: 'your-db',
+  user: 'your-user',
+  password: 'your-password',
   ssl: { rejectUnauthorized: false },
   keepAlive: true
 };
@@ -201,7 +201,13 @@ async function insertCSVToPostgres(filePath, objectName) {
       fs.createReadStream(filePath).pipe(csv()).on('headers', resolve).on('error', reject);
     });
 
-    await client.query(`CREATE TABLE IF NOT EXISTS "${objectName}" (${headers.map(h => `"${h}" ${mapSFTypeToPostgres(FIELD_TYPES_MAP[h] || 'string')}`).join(', ')});`);
+    const columnsSql = headers.map(h => {
+      const type = mapSFTypeToPostgres(FIELD_TYPES_MAP[h] || 'string');
+      const constraints = h === 'Id' ? 'PRIMARY KEY' : '';
+      return `"${h}" ${type} ${constraints}`;
+    }).join(', ');
+
+    await client.query(`CREATE TABLE IF NOT EXISTS "${objectName}" (${columnsSql});`);
     await client.query(`DROP TABLE IF EXISTS ${tempTable};`);
     await client.query(`CREATE TEMP TABLE ${tempTable} AS SELECT * FROM "${objectName}" WITH NO DATA;`);
 
@@ -267,9 +273,6 @@ async function backupObject(objectName, isIncremental = false) {
 // === Express Server ===
 const app = express();
 app.use(express.json());
-// Add this just after `app.use(express.json())`
-app.get('/', (_, res) => res.send('✅ Salesforce Backup Service Running.'));
-
 
 app.post('/api/backup', async (req, res) => {
   try {
@@ -294,6 +297,4 @@ app.post('/api/backup', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
