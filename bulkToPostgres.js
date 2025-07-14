@@ -169,30 +169,60 @@ async function cleanCSV(filePath) {
 async function insertToPostgres(cleanPath, objectName) {
   const client = new Client(PG_CONFIG);
   await client.connect();
-  const headers = await new Promise((resolve, reject) => {
-    fs.createReadStream(cleanPath).pipe(csv()).on('headers', resolve).on('error', reject);
-  });
-  await client.query(`CREATE TABLE IF NOT EXISTS "${objectName}" (${headers.map(h => `"${h}" TEXT`).join(', ')});`);
-  const tempTable = `"${objectName}_temp"`;
-  await client.query(`DROP TABLE IF EXISTS ${tempTable}`);
-  await client.query(`CREATE TEMP TABLE ${tempTable} AS SELECT * FROM "${objectName}" WITH NO DATA`);
-  const copySQL = `COPY ${tempTable} (${headers.map(h => `"${h}"`).join(', ')}) FROM STDIN WITH CSV HEADER NULL '\\N'`;
-  const stream = client.query(copyFrom(copySQL));
-  fs.createReadStream(cleanPath).pipe(stream);
-  await new Promise((resolve, reject) => {
-    stream.on('finish', resolve);
-    stream.on('error', reject);
-  });
-  const upsertSQL = `
-    INSERT INTO "${objectName}" (${headers.map(h => `"${h}"`).join(', ')})
-    SELECT ${headers.map(h => `"${h}"`).join(', ')} FROM ${tempTable}
-    ON CONFLICT ("Id") DO UPDATE SET
-    ${headers.filter(h => h !== 'Id').map(h => `"${h}" = EXCLUDED."${h}"`).join(', ')};
-  `;
-  await client.query(upsertSQL);
-  const res = await client.query(`SELECT COUNT(*) FROM ${tempTable}`);
-  await client.end();
-  return parseInt(res.rows[0].count);
+
+  try {
+    const headers = await new Promise((resolve, reject) => {
+      fs.createReadStream(cleanPath).pipe(csv())
+        .on('headers', resolve)
+        .on('error', reject);
+    });
+
+    // Check if table exists
+    const tableExists = await client.query(
+      `SELECT to_regclass($1) AS exists;`,
+      [`"${objectName}"`]
+    );
+
+    // If table does not exist, create it with PRIMARY KEY on Id
+    if (!tableExists.rows[0].exists) {
+      await client.query(`
+        CREATE TABLE "${objectName}" (
+          ${headers.map(h => `"${h}" TEXT`).join(', ')},
+          PRIMARY KEY ("Id")
+        );
+      `);
+    }
+
+    // Create temp table
+    const tempTable = `"${objectName}_temp"`;
+    await client.query(`DROP TABLE IF EXISTS ${tempTable}`);
+    await client.query(`CREATE TEMP TABLE ${tempTable} AS SELECT * FROM "${objectName}" WITH NO DATA`);
+
+    // Copy CSV into temp table
+    const copySQL = `COPY ${tempTable} (${headers.map(h => `"${h}"`).join(', ')}) FROM STDIN WITH CSV HEADER NULL '\\N'`;
+    const stream = client.query(copyFrom(copySQL));
+    fs.createReadStream(cleanPath).pipe(stream);
+
+    await new Promise((resolve, reject) => {
+      stream.on('finish', resolve);
+      stream.on('error', reject);
+    });
+
+    // Upsert from temp to main table
+    const upsertSQL = `
+      INSERT INTO "${objectName}" (${headers.map(h => `"${h}"`).join(', ')})
+      SELECT ${headers.map(h => `"${h}"`).join(', ')} FROM ${tempTable}
+      ON CONFLICT ("Id") DO UPDATE SET
+      ${headers.filter(h => h !== 'Id').map(h => `"${h}" = EXCLUDED."${h}"`).join(', ')};
+    `;
+    await client.query(upsertSQL);
+
+    // Count inserted records
+    const res = await client.query(`SELECT COUNT(*) FROM ${tempTable}`);
+    return parseInt(res.rows[0].count);
+  } finally {
+    await client.end();
+  }
 }
 
 async function logBackupToSalesforce(objectName, recordCount, status, cleanPath = null) {
