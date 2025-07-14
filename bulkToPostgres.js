@@ -29,6 +29,7 @@ const PG_CONFIG = {
   keepAlive: true
 };
 
+
 // === Helper Functions ===
 function mapSFTypeToPostgres(sfType) {
   const map = {
@@ -56,6 +57,61 @@ async function getAllObjectNames() {
       !o.name.toLowerCase().includes('recordalerttemplatelocalization')
     )
     .map(o => o.name);
+}
+
+async function createTable(client, objectName, headers) {
+  const cols = headers.map(h => `"${h}" ${mapSFTypeToPostgres(FIELD_TYPES_MAP[h] || 'string')}`);
+  await client.query(`CREATE TABLE IF NOT EXISTS "${objectName}" (${cols.join(', ')});`);
+
+  if (headers.includes('Id')) {
+    await client.query(`DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conrelid = '"${objectName}"'::regclass 
+        AND conname = '${objectName}_id_key'
+      ) THEN
+        ALTER TABLE "${objectName}" ADD CONSTRAINT "${objectName}_id_key" UNIQUE ("Id");
+      END IF;
+    END$$;`);
+  }
+}
+
+async function insertCSVToPostgres(filePath, objectName) {
+  const client = new Client(PG_CONFIG);
+  await client.connect();
+  const tempTable = `"${objectName}_temp"`;
+
+  try {
+    const headers = await new Promise((resolve, reject) => {
+      fs.createReadStream(filePath).pipe(csv()).on('headers', resolve).on('error', reject);
+    });
+
+    await createTable(client, objectName, headers);
+    await client.query(`DROP TABLE IF EXISTS ${tempTable};`);
+    await client.query(`CREATE TEMP TABLE ${tempTable} AS SELECT * FROM "${objectName}" WITH NO DATA;`);
+
+    const copySQL = `COPY ${tempTable} (${headers.map(h => `"${h}"`).join(', ')}) FROM STDIN WITH CSV HEADER NULL '\\N'`;
+    const stream = client.query(copyFrom(copySQL));
+    fs.createReadStream(filePath).pipe(stream);
+    await new Promise((resolve, reject) => {
+      stream.on('finish', resolve);
+      stream.on('error', reject);
+    });
+
+    const upsertSQL = `
+      INSERT INTO "${objectName}" (${headers.map(h => `"${h}"`).join(', ')})
+      SELECT ${headers.map(h => `"${h}"`).join(', ')} FROM ${tempTable}
+      ON CONFLICT ("Id") DO UPDATE SET
+      ${headers.filter(h => h !== 'Id').map(h => `"${h}" = EXCLUDED."${h}"`).join(', ')};
+    `;
+    await client.query(upsertSQL);
+
+    const result = await client.query(`SELECT COUNT(*) FROM ${tempTable};`);
+    return parseInt(result.rows[0].count, 10);
+  } finally {
+    await client.end();
+  }
 }
 
 async function getAllFields(objectName) {
