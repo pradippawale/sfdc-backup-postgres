@@ -239,7 +239,6 @@ async function logBackupToSalesforce({ objectName, recordCount, mode, status }) 
   const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects/Backup_Log__c`;
 
   const payload = {
-    Name: `${objectName} Backup`,
     Object_Name__c: objectName,
     Record_Count__c: recordCount,
     Backup_Mode__c: mode,
