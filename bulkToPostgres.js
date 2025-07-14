@@ -239,7 +239,7 @@ async function logBackupToSalesforce({ objectName, recordCount, status, error = 
   const body = {
     Object_Name__c: objectName,
     Record_Count__c: recordCount,
-    Backup_Status__c: status,
+    Status__c: status,
     Backup_Timestamp__c: new Date().toISOString(),
     Error_Message__c: error || null
   };
