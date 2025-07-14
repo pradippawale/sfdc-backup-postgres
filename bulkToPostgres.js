@@ -14,8 +14,9 @@ const pLimit = require('p-limit');
 const delay = ms => new Promise(res => setTimeout(res, ms));
 let FIELD_TYPES_MAP = {};
 
+// === Config ===
 // === Configuration ===
-const ACCESS_TOKEN = '00DfJ000002QrbH!AQEAQCguWQ87WidUu3Hg2ai3eckdmmk5NSbm6IQJmhposdCtDzjXRFgzUvKrgFsomJggYUCOYIaMzPtsVf4GKkmz.kA5hSCu';
+const ACCESS_TOKEN = '00DfJ000002QrbH!AQEAQAKuWf9reAXtxwNcs7C1kkIGs06BZfHwpalWftoV8RKaT.MAV6DLDIbs5UFxYvrPRubcYvNc6NCI4m6nGW6QdTzlgxBi';
 const INSTANCE_URL = 'https://coresolute4-dev-ed.develop.my.salesforce.com';
 const API_VERSION = 'v60.0';
 
@@ -28,7 +29,6 @@ const PG_CONFIG = {
   ssl: { rejectUnauthorized: false },
   keepAlive: true
 };
-
 // === Helper Functions ===
 function mapSFTypeToPostgres(sfType) {
   const map = {
@@ -37,6 +37,38 @@ function mapSFTypeToPostgres(sfType) {
     double: 'FLOAT', currency: 'FLOAT', percent: 'FLOAT', date: 'DATE', datetime: 'TIMESTAMP'
   };
   return map[sfType.toLowerCase()] || 'TEXT';
+}
+
+async function getAllObjectNames() {
+  const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects`;
+  const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
+  return res.data.sobjects
+    .filter(o =>
+      o.queryable &&
+      !o.name.match(/(__Share|__Tag|__History|__Feed|ChangeEvent)/) &&
+      !o.name.toLowerCase().includes('permissionsetgroup') &&
+      !o.name.toLowerCase().includes('recordtype')
+    )
+    .map(o => o.name);
+}
+
+async function getAllFields(objectName) {
+  const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects/${objectName}/describe`;
+  const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
+
+  FIELD_TYPES_MAP = {};
+  const unsupported = ['address', 'location', 'base64', 'json'];
+  const fields = res.data.fields
+    .filter(f => !unsupported.includes(f.type) && (!f.compoundFieldName || f.name === 'Name'))
+    .map(f => {
+      FIELD_TYPES_MAP[f.name] = f.type;
+      return f.name;
+    });
+
+  if (!fields.includes('Id')) fields.unshift('Id');
+  if (!fields.includes('Name')) fields.unshift('Name');
+
+  return [...new Set(fields)];
 }
 
 async function getLastBackupTime(objectName) {
@@ -58,49 +90,35 @@ async function setLastBackupTime(objectName) {
     await client.query(`
       INSERT INTO last_backup (object_name, last_run)
       VALUES ($1, NOW())
-      ON CONFLICT (object_name) DO UPDATE SET last_run = NOW();
+      ON CONFLICT (object_name)
+      DO UPDATE SET last_run = NOW();
     `, [objectName]);
   } finally {
     await client.end();
   }
 }
 
-async function getAllObjectNames() {
-  const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects`;
-  const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
-
-  return res.data.sobjects
-    .filter(o =>
-      o.queryable &&
-      !o.name.endsWith('__Share') &&
-      !o.name.endsWith('__Tag') &&
-      !o.name.endsWith('__History') &&
-      !o.name.endsWith('__Feed') &&
-      !o.name.includes('ChangeEvent') &&
-      !o.name.toLowerCase().includes('permissionsetgroup') &&
-      !o.name.toLowerCase().includes('recordtype')
-    )
-    .map(o => o.name);
-}
-
-async function getAllFields(objectName) {
-  const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects/${objectName}/describe`;
-  const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
-  FIELD_TYPES_MAP = {};
-  const unsupported = ['address', 'location', 'base64', 'json'];
-  let fields = res.data.fields
-    .filter(f => !unsupported.includes(f.type) && (!f.compoundFieldName || f.name === 'Name'))
-    .map(f => { FIELD_TYPES_MAP[f.name] = f.type; return f.name; });
-  if (!fields.includes('Id')) fields.unshift('Id');
-  if (!fields.includes('Name')) fields.unshift('Name');
-  return [...new Set(fields)];
+async function hasRecentChangesSince(objectName, sinceTimestamp) {
+  const formatted = sinceTimestamp.toISOString();
+  const q = encodeURIComponent(`SELECT Id FROM ${objectName} WHERE LastModifiedDate > ${formatted} LIMIT 1`);
+  const url = `${INSTANCE_URL}/services/data/${API_VERSION}/query?q=${q}`;
+  try {
+    const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
+    return res.data.totalSize > 0;
+  } catch {
+    return false;
+  }
 }
 
 async function createBulkQueryJob(soql) {
   const url = `${INSTANCE_URL}/services/data/${API_VERSION}/jobs/query`;
   const res = await axios.post(url, {
-    operation: 'query', query: soql, contentType: 'CSV'
-  }, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, 'Content-Type': 'application/json' } });
+    operation: 'query',
+    query: soql,
+    contentType: 'CSV'
+  }, {
+    headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, 'Content-Type': 'application/json' }
+  });
   return res.data;
 }
 
@@ -120,24 +138,25 @@ async function pollJob(jobId, timeout = 300000) {
 
 async function downloadResults(jobId) {
   const url = `${INSTANCE_URL}/services/data/${API_VERSION}/jobs/query/${jobId}/results`;
-  const res = await axios.get(url, {
-    headers: { Authorization: `Bearer ${ACCESS_TOKEN}` }, responseType: 'stream'
-  });
-  const tempFilePath = path.join(__dirname, `temp_${jobId}.csv`);
-  const writer = fs.createWriteStream(tempFilePath);
+  const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` }, responseType: 'stream' });
+  const filePath = path.join(__dirname, `temp_${jobId}.csv`);
+  const writer = fs.createWriteStream(filePath);
   res.data.pipe(writer);
   return new Promise((resolve, reject) => {
-    writer.on('finish', () => resolve(tempFilePath));
+    writer.on('finish', () => resolve(filePath));
     writer.on('error', reject);
   });
 }
 
 async function cleanCSV(filePath) {
   const outputPath = filePath.replace('.csv', '_clean.csv');
-  const parser = fs.createReadStream(filePath).pipe(parse({ columns: true, relax_quotes: true, skip_empty_lines: true, relax_column_count: true, skip_records_with_error: true }));
+  const parser = fs.createReadStream(filePath).pipe(parse({ columns: true, skip_empty_lines: true }));
   const writer = fs.createWriteStream(outputPath);
   const stringifier = stringify({ header: true });
-  parser.on('data', row => { for (let key in row) row[key] = row[key] === '' ? '\\N' : row[key]; stringifier.write(row); });
+  parser.on('data', row => {
+    for (let key in row) row[key] = row[key] === '' ? '\\N' : row[key];
+    stringifier.write(row);
+  });
   parser.on('end', () => stringifier.end());
   stringifier.pipe(writer);
   return new Promise((resolve, reject) => {
@@ -147,120 +166,117 @@ async function cleanCSV(filePath) {
   });
 }
 
-async function createTable(client, objectName, headers) {
-  const cols = headers.map(h => `"${h}" ${mapSFTypeToPostgres(FIELD_TYPES_MAP[h] || 'string')}`);
-  if (headers.includes('Id')) cols[headers.indexOf('Id')] += ' PRIMARY KEY';
-  await client.query(`CREATE TABLE IF NOT EXISTS "${objectName}" (${cols.join(', ')});`);
-}
-
-async function insertCSVToPostgres(filePath, objectName) {
+async function insertToPostgres(cleanPath, objectName) {
   const client = new Client(PG_CONFIG);
   await client.connect();
+  const headers = await new Promise((resolve, reject) => {
+    fs.createReadStream(cleanPath).pipe(csv()).on('headers', resolve).on('error', reject);
+  });
+  await client.query(`CREATE TABLE IF NOT EXISTS "${objectName}" (${headers.map(h => `"${h}" TEXT`).join(', ')});`);
   const tempTable = `"${objectName}_temp"`;
-  try {
-    const headers = await new Promise((resolve, reject) => {
-      fs.createReadStream(filePath).pipe(csv()).on('headers', resolve).on('error', reject);
-    });
-    await createTable(client, objectName, headers);
-    await client.query(`DROP TABLE IF EXISTS ${tempTable};`);
-    await client.query(`CREATE TEMP TABLE ${tempTable} AS SELECT * FROM "${objectName}" WITH NO DATA;`);
-    const copySQL = `COPY ${tempTable} (${headers.map(h => `"${h}"`).join(', ')}) FROM STDIN WITH CSV HEADER NULL '\\N'`;
-    const stream = client.query(copyFrom(copySQL));
-    fs.createReadStream(filePath).pipe(stream);
-    await new Promise((resolve, reject) => {
-      stream.on('finish', resolve);
-      stream.on('error', reject);
-    });
-    const upsertSQL = `INSERT INTO "${objectName}" (${headers.map(h => `"${h}"`).join(', ')}) SELECT ${headers.map(h => `"${h}"`).join(', ')} FROM ${tempTable} ON CONFLICT ("Id") DO UPDATE SET ${headers.filter(h => h !== 'Id').map(h => `"${h}" = EXCLUDED."${h}"`).join(', ')};`;
-    await client.query(upsertSQL);
-    const result = await client.query(`SELECT COUNT(*) FROM ${tempTable};`);
-    return parseInt(result.rows[0].count, 10);
-  } finally {
-    await client.end();
-  }
+  await client.query(`DROP TABLE IF EXISTS ${tempTable}`);
+  await client.query(`CREATE TEMP TABLE ${tempTable} AS SELECT * FROM "${objectName}" WITH NO DATA`);
+  const copySQL = `COPY ${tempTable} (${headers.map(h => `"${h}"`).join(', ')}) FROM STDIN WITH CSV HEADER NULL '\\N'`;
+  const stream = client.query(copyFrom(copySQL));
+  fs.createReadStream(cleanPath).pipe(stream);
+  await new Promise((resolve, reject) => {
+    stream.on('finish', resolve);
+    stream.on('error', reject);
+  });
+  const upsertSQL = `
+    INSERT INTO "${objectName}" (${headers.map(h => `"${h}"`).join(', ')})
+    SELECT ${headers.map(h => `"${h}"`).join(', ')} FROM ${tempTable}
+    ON CONFLICT ("Id") DO UPDATE SET
+    ${headers.filter(h => h !== 'Id').map(h => `"${h}" = EXCLUDED."${h}"`).join(', ')};
+  `;
+  await client.query(upsertSQL);
+  const res = await client.query(`SELECT COUNT(*) FROM ${tempTable}`);
+  await client.end();
+  return parseInt(res.rows[0].count);
 }
 
-async function logBackup({ objectName, recordCount, status, error, csvFilePath }) {
+async function logBackupToSalesforce(objectName, recordCount, status, cleanPath = null) {
   const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects/Backup_Log__c`;
   const body = {
     Object_Name__c: objectName,
     Record_Count__c: recordCount,
     Status__c: status,
-    Backup_Timestamp__c: new Date().toISOString(),
-    Error_Message__c: error || null
+    Backup_Timestamp__c: new Date().toISOString()
   };
-  try {
-    const res = await axios.post(url, body, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, 'Content-Type': 'application/json' } });
-    const backupLogId = res.data.id;
-    if (status === 'Success' && csvFilePath) {
-      const fileData = fs.readFileSync(csvFilePath).toString('base64');
-      const fileName = path.basename(csvFilePath);
-      const contentVersionRes = await axios.post(`${INSTANCE_URL}/services/data/${API_VERSION}/sobjects/ContentVersion`, {
-        Title: `${objectName}_Backup`, PathOnClient: fileName, VersionData: fileData
-      }, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, 'Content-Type': 'application/json' } });
-      const contentDocumentId = (await axios.get(`${INSTANCE_URL}/services/data/${API_VERSION}/query?q=` + encodeURIComponent(`SELECT ContentDocumentId FROM ContentVersion WHERE Id = '${contentVersionRes.data.id}'`), { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } })).data.records[0].ContentDocumentId;
-      await axios.post(`${INSTANCE_URL}/services/data/${API_VERSION}/sobjects/ContentDocumentLink`, {
-        ContentDocumentId: contentDocumentId, LinkedEntityId: backupLogId, ShareType: 'V'
-      }, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, 'Content-Type': 'application/json' } });
-    }
-  } catch (err) {
-    console.error(`❌ Failed to log/attach for ${objectName}: ${err.message}`);
+  const res = await axios.post(url, body, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, 'Content-Type': 'application/json' } });
+  const logId = res.data.id;
+
+  if (cleanPath) {
+    const fileData = fs.readFileSync(cleanPath).toString('base64');
+    const fileName = path.basename(cleanPath);
+    const contentVersion = await axios.post(
+      `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects/ContentVersion`,
+      {
+        Title: `${objectName}_Backup`,
+        PathOnClient: fileName,
+        VersionData: fileData
+      },
+      { headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, 'Content-Type': 'application/json' } }
+    );
+    const versionId = contentVersion.data.id;
+    const contentDocRes = await axios.get(
+      `${INSTANCE_URL}/services/data/${API_VERSION}/query?q=` +
+      encodeURIComponent(`SELECT ContentDocumentId FROM ContentVersion WHERE Id = '${versionId}'`),
+      { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } }
+    );
+    const contentDocumentId = contentDocRes.data.records[0].ContentDocumentId;
+    await axios.post(
+      `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects/ContentDocumentLink`,
+      {
+        ContentDocumentId: contentDocumentId,
+        LinkedEntityId: logId,
+        ShareType: 'V'
+      },
+      { headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, 'Content-Type': 'application/json' } }
+    );
   }
 }
 
-async function backupObject(objectName, isIncremental = false) {
+async function backupObject(objectName) {
   let rawPath, cleanPath;
   try {
     const fields = await getAllFields(objectName);
-    let soql = `SELECT ${fields.join(', ')} FROM ${objectName}`;
-    if (isIncremental && fields.includes('LastModifiedDate')) {
-      const lastTime = await getLastBackupTime(objectName);
-      if (lastTime) soql += ` WHERE LastModifiedDate > ${lastTime.toISOString()}`;
-    }
+    if (!fields.includes('LastModifiedDate')) return; // ⛔ Skip if no LastModifiedDate
+    const lastTime = await getLastBackupTime(objectName);
+    if (!lastTime) return;
+    const hasChanges = await hasRecentChangesSince(objectName, lastTime);
+    if (!hasChanges) return;
+
+    const soql = `SELECT ${fields.join(', ')} FROM ${objectName} WHERE LastModifiedDate > ${lastTime.toISOString()}`;
     const job = await createBulkQueryJob(soql);
     await pollJob(job.id);
     rawPath = await downloadResults(job.id);
     cleanPath = await cleanCSV(rawPath);
-    const recordCount = await insertCSVToPostgres(cleanPath, objectName);
-    if (isIncremental) await setLastBackupTime(objectName);
-    await logBackup({ objectName, recordCount, status: 'Success', csvFilePath: cleanPath });
-    console.log(`✅ Success: ${objectName}`);
-  } catch (err) {
-    console.warn(`❌ Failed: ${objectName}: ${err.message}`);
-    await logBackup({ objectName, recordCount: 0, status: 'Failed', error: err.message });
+    const count = await insertToPostgres(cleanPath, objectName);
+    await logBackupToSalesforce(objectName, count, 'Success', cleanPath);
+    await setLastBackupTime(objectName);
+  } catch (e) {
+    await logBackupToSalesforce(objectName, 0, 'Failed');
+    console.error(`❌ ${objectName}: ${e.message}`);
   } finally {
-    try {
-      if (rawPath && fs.existsSync(rawPath)) fs.unlinkSync(rawPath);
-      if (cleanPath && fs.existsSync(cleanPath)) fs.unlinkSync(cleanPath);
-    } catch (err) {
-      console.warn(`⚠️ Failed to delete temp files: ${err.message}`);
-    }
+    if (rawPath && fs.existsSync(rawPath)) fs.unlinkSync(rawPath);
+    if (cleanPath && fs.existsSync(cleanPath)) fs.unlinkSync(cleanPath);
   }
 }
 
+// === Express Server ===
 const app = express();
 app.use(express.json());
 
 app.post('/api/backup', async (req, res) => {
-  try {
-    const inputList = req.body.objectNames || [];
-    const isIncremental = req.body.incremental || false;
-    const allObjects = await getAllObjectNames();
-    const selected = inputList.length ? allObjects.filter(o => inputList.includes(o)) : allObjects;
-    res.json({ message: `✅ ${isIncremental ? 'Incremental' : 'Full'} backup started`, objects: selected });
-    process.nextTick(async () => {
-      const limit = pLimit(1);
-      for (const obj of selected) {
-        await limit(() => backupObject(obj, isIncremental));
-      }
-    });
-  } catch (err) {
-    console.error('❌ API Error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
+  const list = req.body.objectNames || [];
+  const all = await getAllObjectNames();
+  const toBackup = list.length ? all.filter(o => list.includes(o)) : all;
+  res.json({ message: '🔄 Incremental backup started...', objects: toBackup });
+  process.nextTick(async () => {
+    const limit = pLimit(1);
+    for (const obj of toBackup) await limit(() => backupObject(obj));
+  });
 });
 
-const PORT = process.env.PORT || 3000;
-if (require.main === module) {
-  app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
-}
+app.listen(3000, () => console.log('🚀 Server on port 3000'));
