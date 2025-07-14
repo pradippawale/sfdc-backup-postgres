@@ -29,16 +29,8 @@ const PG_CONFIG = {
   keepAlive: true
 };
 
-// === Helper Functions ===
-function mapSFTypeToPostgres(sfType) {
-  const map = {
-    string: 'TEXT', picklist: 'TEXT', textarea: 'TEXT', email: 'TEXT', id: 'TEXT',
-    phone: 'TEXT', url: 'TEXT', boolean: 'BOOLEAN', int: 'INTEGER',
-    double: 'FLOAT', currency: 'FLOAT', percent: 'FLOAT', date: 'DATE', datetime: 'TIMESTAMP'
-  };
-  return map[sfType.toLowerCase()] || 'TEXT';
-}
 
+// === Helper Functions ===
 async function getAllObjectNames() {
   const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects`;
   const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
@@ -87,8 +79,7 @@ async function setLastBackupTime(objectName) {
 }
 
 async function hasRecentChangesSince(objectName, sinceTimestamp) {
-  const formatted = sinceTimestamp.toISOString();
-  const q = encodeURIComponent(`SELECT Id FROM ${objectName} WHERE LastModifiedDate > ${formatted} LIMIT 1`);
+  const q = encodeURIComponent(`SELECT Id FROM ${objectName} WHERE LastModifiedDate > ${sinceTimestamp.toISOString()} LIMIT 1`);
   const url = `${INSTANCE_URL}/services/data/${API_VERSION}/query?q=${q}`;
   try {
     const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
@@ -101,24 +92,26 @@ async function hasRecentChangesSince(objectName, sinceTimestamp) {
 async function createBulkQueryJob(soql) {
   const url = `${INSTANCE_URL}/services/data/${API_VERSION}/jobs/query`;
   const res = await axios.post(url, {
-    operation: 'query', query: soql, contentType: 'CSV'
+    operation: 'query',
+    query: soql,
+    contentType: 'CSV'
   }, {
     headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, 'Content-Type': 'application/json' }
   });
   return res.data;
 }
 
-async function pollJob(jobId, timeout = 300000) {
+async function pollJob(jobId) {
   const url = `${INSTANCE_URL}/services/data/${API_VERSION}/jobs/query/${jobId}`;
   let state = 'InProgress';
   const start = Date.now();
   while (['InProgress', 'UploadComplete'].includes(state)) {
-    if (Date.now() - start > timeout) throw new Error(`Polling timeout for job ${jobId}`);
+    if (Date.now() - start > 300000) throw new Error(`Timeout on job ${jobId}`);
     const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
     state = res.data.state;
     if (state === 'JobComplete') return;
     if (['Failed', 'Aborted'].includes(state)) throw new Error(`Job ${state}`);
-    await delay(4000);
+    await delay(3000);
   }
 }
 
@@ -159,13 +152,13 @@ async function insertToPostgres(cleanPath, objectName) {
     fs.createReadStream(cleanPath).pipe(csv()).on('headers', resolve).on('error', reject);
   });
 
-  const columnDefs = headers.map(h => `"${h}" TEXT`).join(', ');
-await client.query(`
-  CREATE TABLE IF NOT EXISTS "${objectName}" (
-    ${headers.map(h => `"${h}" TEXT`).join(', ')},
-    UNIQUE ("Id")
-  );
-`);
+  // Ensure table exists with unique constraint
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS "${objectName}" (
+      ${headers.map(h => `"${h}" TEXT`).join(', ')},
+      UNIQUE ("Id")
+    );
+  `);
 
   const tempTable = `"${objectName}_temp"`;
   await client.query(`DROP TABLE IF EXISTS ${tempTable}`);
@@ -174,7 +167,6 @@ await client.query(`
   const copySQL = `COPY ${tempTable} (${headers.map(h => `"${h}"`).join(', ')}) FROM STDIN WITH CSV HEADER NULL '\\N'`;
   const stream = client.query(copyFrom(copySQL));
   fs.createReadStream(cleanPath).pipe(stream);
-
   await new Promise((resolve, reject) => {
     stream.on('finish', resolve);
     stream.on('error', reject);
@@ -193,10 +185,10 @@ await client.query(`
   return parseInt(res.rows[0].count);
 }
 
+// 🔁 Main Backup Logic
 async function backupObject(objectName, mode = 'incremental') {
   let rawPath, cleanPath;
   console.time(`🔁 ${objectName}`);
-
   try {
     const fields = await getAllFields(objectName);
     if (!fields.includes('LastModifiedDate')) return;
@@ -215,8 +207,8 @@ async function backupObject(objectName, mode = 'incremental') {
     cleanPath = await cleanCSV(rawPath);
     const count = await insertToPostgres(cleanPath, objectName);
     await setLastBackupTime(objectName);
-    console.log(`✅ ${objectName}: ${count} records backed up.`);
 
+    console.log(`✅ ${objectName}: ${count} records backed up.`);
   } catch (err) {
     console.error(`❌ ${objectName}: ${err.message}`);
   } finally {
