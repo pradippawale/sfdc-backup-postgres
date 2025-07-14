@@ -189,6 +189,7 @@ async function insertToPostgres(cleanPath, objectName) {
 async function backupObject(objectName, mode = 'incremental') {
   let rawPath, cleanPath;
   console.time(`🔁 ${objectName}`);
+
   try {
     const fields = await getAllFields(objectName);
     if (!fields.includes('LastModifiedDate')) return;
@@ -209,12 +210,53 @@ async function backupObject(objectName, mode = 'incremental') {
     await setLastBackupTime(objectName);
 
     console.log(`✅ ${objectName}: ${count} records backed up.`);
+
+    await logBackupToSalesforce({
+      objectName,
+      recordCount: count,
+      mode,
+      status: 'Success'
+    });
+
   } catch (err) {
     console.error(`❌ ${objectName}: ${err.message}`);
+
+    await logBackupToSalesforce({
+      objectName,
+      recordCount: 0,
+      mode,
+      status: 'Failed'
+    });
+
   } finally {
     if (rawPath && fs.existsSync(rawPath)) fs.unlinkSync(rawPath);
     if (cleanPath && fs.existsSync(cleanPath)) fs.unlinkSync(cleanPath);
     console.timeEnd(`🔁 ${objectName}`);
+  }
+}
+
+async function logBackupToSalesforce({ objectName, recordCount, mode, status }) {
+  const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects/Backup_Log__c`;
+
+  const payload = {
+    Name: `${objectName} Backup`,
+    Object_Name__c: objectName,
+    Record_Count__c: recordCount,
+    Backup_Mode__c: mode,
+    Backup_Status__c: status,
+    Backup_Timestamp__c: new Date().toISOString()
+  };
+
+  try {
+    await axios.post(url, payload, {
+      headers: {
+        Authorization: `Bearer ${ACCESS_TOKEN}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    console.log(`📝 Backup log created for ${objectName}`);
+  } catch (err) {
+    console.error(`⚠️ Failed to log backup for ${objectName}: ${err.message}`);
   }
 }
 
