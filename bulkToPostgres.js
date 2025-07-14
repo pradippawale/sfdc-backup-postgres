@@ -198,7 +198,7 @@ async function insertToPostgres(cleanPath, objectName) {
     }
 
     // Create temp table
-    const tempTable = `${quotedObject}_temp`;
+    const tempTable = `${quotedObject}`;
     await client.query(`DROP TABLE IF EXISTS ${tempTable}`);
     await client.query(`CREATE TEMP TABLE ${tempTable} AS SELECT * FROM ${quotedObject} WITH NO DATA`);
 
