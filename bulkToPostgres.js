@@ -29,7 +29,6 @@ const PG_CONFIG = {
   keepAlive: true
 };
 
-
 // === Helper Functions ===
 function mapSFTypeToPostgres(sfType) {
   const map = {
@@ -47,16 +46,32 @@ async function getAllObjectNames() {
   return res.data.sobjects
     .filter(o =>
       o.queryable &&
-      !o.name.endsWith('__Share') &&
-      !o.name.endsWith('__Tag') &&
-      !o.name.endsWith('__History') &&
-      !o.name.endsWith('__Feed') &&
-      !o.name.includes('ChangeEvent') &&
+      !o.name.match(/(__Share|__Tag|__History|__Feed|ChangeEvent)/) &&
       !o.name.toLowerCase().includes('permissionsetgroup') &&
       !o.name.toLowerCase().includes('recordtype') &&
       !o.name.toLowerCase().includes('recordalerttemplatelocalization')
     )
     .map(o => o.name);
+}
+
+async function getAllFields(objectName) {
+  const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects/${objectName}/describe`;
+  const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
+
+  FIELD_TYPES_MAP = {};
+  const unsupported = ['address', 'location', 'base64', 'json'];
+
+  let fields = res.data.fields
+    .filter(f => !unsupported.includes(f.type) && (!f.compoundFieldName || f.name === 'Name'))
+    .map(f => {
+      FIELD_TYPES_MAP[f.name] = f.type;
+      return f.name;
+    });
+
+  if (!fields.includes('Id')) fields.unshift('Id');
+  if (!fields.includes('Name')) fields.unshift('Name');
+
+  return [...new Set(fields)];
 }
 
 async function createTable(client, objectName, headers) {
@@ -114,26 +129,6 @@ async function insertCSVToPostgres(filePath, objectName) {
   }
 }
 
-async function getAllFields(objectName) {
-  const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects/${objectName}/describe`;
-  const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
-
-  FIELD_TYPES_MAP = {};
-  const unsupported = ['address', 'location', 'base64', 'json'];
-
-  let fields = res.data.fields
-    .filter(f => !unsupported.includes(f.type) && (!f.compoundFieldName || f.name === 'Name'))
-    .map(f => {
-      FIELD_TYPES_MAP[f.name] = f.type;
-      return f.name;
-    });
-
-  if (!fields.includes('Id')) fields.unshift('Id');
-  if (!fields.includes('Name')) fields.unshift('Name');
-
-  return [...new Set(fields)];
-}
-
 async function getLastBackupTime(objectName) {
   const client = new Client(PG_CONFIG);
   await client.connect();
@@ -165,9 +160,8 @@ async function setLastBackupTime(objectName) {
 }
 
 async function hasRecentChangesSince(objectName, sinceTimestamp) {
-  const modField = 'LastModifiedDate';
   const formatted = sinceTimestamp.toISOString();
-  const q = encodeURIComponent(`SELECT Id FROM ${objectName} WHERE ${modField} > ${formatted} LIMIT 1`);
+  const q = encodeURIComponent(`SELECT Id FROM ${objectName} WHERE LastModifiedDate > ${formatted} LIMIT 1`);
   const url = `${INSTANCE_URL}/services/data/${API_VERSION}/query?q=${q}`;
   try {
     const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
@@ -246,50 +240,6 @@ async function cleanCSV(filePath) {
   });
 }
 
-async function insertCSVToPostgres(filePath, objectName) {
-  const client = new Client(PG_CONFIG);
-  await client.connect();
-
-  const tempTable = `"${objectName}_temp"`;
-
-  try {
-    const headers = await new Promise((resolve, reject) => {
-      fs.createReadStream(filePath).pipe(csv()).on('headers', resolve).on('error', reject);
-    });
-
-    const columnsSql = headers.map(h => {
-      const type = mapSFTypeToPostgres(FIELD_TYPES_MAP[h] || 'string');
-      const constraints = h === 'Id' ? 'PRIMARY KEY' : '';
-      return `"${h}" ${type} ${constraints}`;
-    }).join(', ');
-
-    await client.query(`CREATE TABLE IF NOT EXISTS "${objectName}" (${columnsSql});`);
-    await client.query(`DROP TABLE IF EXISTS ${tempTable};`);
-    await client.query(`CREATE TEMP TABLE ${tempTable} AS SELECT * FROM "${objectName}" WITH NO DATA;`);
-
-    const copySQL = `COPY ${tempTable} (${headers.map(h => `"${h}"`).join(', ')}) FROM STDIN WITH CSV HEADER NULL '\\N'`;
-    const stream = client.query(copyFrom(copySQL));
-    fs.createReadStream(filePath).pipe(stream);
-    await new Promise((resolve, reject) => {
-      stream.on('finish', resolve);
-      stream.on('error', reject);
-    });
-
-    const upsertSQL = `
-      INSERT INTO "${objectName}" (${headers.map(h => `"${h}"`).join(', ')})
-      SELECT ${headers.map(h => `"${h}"`).join(', ')} FROM ${tempTable}
-      ON CONFLICT ("Id") DO UPDATE SET
-      ${headers.filter(h => h !== 'Id').map(h => `"${h}" = EXCLUDED."${h}"`).join(', ')};
-    `;
-    await client.query(upsertSQL);
-
-    const result = await client.query(`SELECT COUNT(*) FROM ${tempTable};`);
-    return parseInt(result.rows[0].count, 10);
-  } finally {
-    await client.end();
-  }
-}
-
 async function backupObject(objectName, isIncremental = false) {
   let rawPath, cleanPath;
   try {
@@ -299,13 +249,13 @@ async function backupObject(objectName, isIncremental = false) {
     if (isIncremental) {
       const lastTime = await getLastBackupTime(objectName);
       if (lastTime && fields.includes('LastModifiedDate')) {
-        const timestamp = lastTime.toISOString().replace('T', ' ').slice(0, 19);
-        soql += ` WHERE LastModifiedDate > ${timestamp}Z`;
+        const timestamp = lastTime.toISOString();
         const changed = await hasRecentChangesSince(objectName, lastTime);
         if (!changed) {
           console.log(`⏭️ Skipped (no changes): ${objectName}`);
           return;
         }
+        soql += ` WHERE LastModifiedDate > ${timestamp}`;
       }
     }
 
