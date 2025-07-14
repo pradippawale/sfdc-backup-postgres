@@ -267,6 +267,9 @@ async function backupObject(objectName, isIncremental = false) {
 // === Express Server ===
 const app = express();
 app.use(express.json());
+// Add this just after `app.use(express.json())`
+app.get('/', (_, res) => res.send('✅ Salesforce Backup Service Running.'));
+
 
 app.post('/api/backup', async (req, res) => {
   try {
@@ -291,4 +294,6 @@ app.post('/api/backup', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
