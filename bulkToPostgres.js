@@ -214,20 +214,18 @@ async function backupObject(objectName, mode = 'incremental') {
     await logBackupToSalesforce({
       objectName,
       recordCount: count,
-      mode,
-      status: 'Success'
+      status: 'Success',
+      csvFilePath: cleanPath
     });
-
   } catch (err) {
     console.error(`❌ ${objectName}: ${err.message}`);
 
     await logBackupToSalesforce({
       objectName,
       recordCount: 0,
-      mode,
-      status: 'Failed'
+      status: 'Failed',
+      error: err.message
     });
-
   } finally {
     if (rawPath && fs.existsSync(rawPath)) fs.unlinkSync(rawPath);
     if (cleanPath && fs.existsSync(cleanPath)) fs.unlinkSync(cleanPath);
@@ -235,27 +233,79 @@ async function backupObject(objectName, mode = 'incremental') {
   }
 }
 
-async function logBackupToSalesforce({ objectName, recordCount, mode, status }) {
+async function logBackupToSalesforce({ objectName, recordCount, status, error = '', csvFilePath = '' }) {
   const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects/Backup_Log__c`;
 
-  const payload = {
+  const body = {
     Object_Name__c: objectName,
     Record_Count__c: recordCount,
-    Backup_Mode__c: mode,
     Backup_Status__c: status,
-    Backup_Timestamp__c: new Date().toISOString()
+    Backup_Timestamp__c: new Date().toISOString(),
+    Error_Message__c: error || null
   };
 
   try {
-    await axios.post(url, payload, {
+    const res = await axios.post(url, body, {
       headers: {
         Authorization: `Bearer ${ACCESS_TOKEN}`,
         'Content-Type': 'application/json'
       }
     });
+
+    const backupLogId = res.data.id;
+
+    if (status === 'Success' && csvFilePath && fs.existsSync(csvFilePath)) {
+      const fileData = fs.readFileSync(csvFilePath).toString('base64');
+      const fileName = path.basename(csvFilePath);
+
+      const contentVersionRes = await axios.post(
+        `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects/ContentVersion`,
+        {
+          Title: `${objectName}_Backup`,
+          PathOnClient: fileName,
+          VersionData: fileData
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${ACCESS_TOKEN}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      const contentVersionId = contentVersionRes.data.id;
+
+      const queryRes = await axios.get(
+        `${INSTANCE_URL}/services/data/${API_VERSION}/query?q=` +
+        encodeURIComponent(`SELECT ContentDocumentId FROM ContentVersion WHERE Id = '${contentVersionId}'`),
+        { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } }
+      );
+
+      const contentDocumentId = queryRes.data.records?.[0]?.ContentDocumentId;
+
+      if (contentDocumentId) {
+        await axios.post(
+          `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects/ContentDocumentLink`,
+          {
+            ContentDocumentId: contentDocumentId,
+            LinkedEntityId: backupLogId,
+            ShareType: 'V'
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${ACCESS_TOKEN}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+        console.log(`📎 Attached file to Backup Log ${backupLogId}`);
+      }
+    }
+
     console.log(`📝 Backup log created for ${objectName}`);
   } catch (err) {
-    console.error(`⚠️ Failed to log backup for ${objectName}: ${err.message}`);
+    const msg = err.response?.data?.[0]?.message || err.message;
+    console.error(`⚠️ Failed to log backup for ${objectName}: ${msg}`);
   }
 }
 
@@ -278,3 +328,4 @@ app.post('/api/backup', async (req, res) => {
 });
 
 app.listen(3000, () => console.log('🚀 Server on port 3000'));
+
