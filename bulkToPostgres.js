@@ -15,16 +15,16 @@ const delay = ms => new Promise(res => setTimeout(res, ms));
 let FIELD_TYPES_MAP = {};
 
 // === Configuration ===
-const ACCESS_TOKEN = 'your_token_here';
-const INSTANCE_URL = 'https://your-instance.salesforce.com';
+const ACCESS_TOKEN = '00DfJ000002QrbH!AQEAQCguWQ87WidUu3Hg2ai3eckdmmk5NSbm6IQJmhposdCtDzjXRFgzUvKrgFsomJggYUCOYIaMzPtsVf4GKkmz.kA5hSCu';
+const INSTANCE_URL = 'https://coresolute4-dev-ed.develop.my.salesforce.com';
 const API_VERSION = 'v60.0';
 
 const PG_CONFIG = {
-  host: 'your-host',
+  host: 'dpg-d1i3u8fdiees73cf0dug-a.oregon-postgres.render.com',
   port: 5432,
-  database: 'your-db',
-  user: 'your-user',
-  password: 'your-password',
+  database: 'sfdatabase_34oi',
+  user: 'sfdatabaseuser',
+  password: 'D898TUsAal4ksBUs5QoQffxMZ6MY5aAH',
   ssl: { rejectUnauthorized: false },
   keepAlive: true
 };
