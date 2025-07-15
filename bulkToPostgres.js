@@ -20,11 +20,11 @@ const INSTANCE_URL = 'https://coresolute4-dev-ed.develop.my.salesforce.com';
 const API_VERSION = 'v60.0';
 
 const PG_CONFIG = {
-  host: 'dpg-d1i3u8fdiees73cf0dug-a.oregon-postgres.render.com',
+  host: 'localhost',
   port: 5432,
-  database: 'sfdatabase_34oi',
-  user: 'sfdatabaseuser',
-  password: 'D898TUsAal4ksBUs5QoQffxMZ6MY5aAH',
+  database: 'newDB',
+  user: 'postgres',
+  password: 'Hello@2050',
   ssl: { rejectUnauthorized: false },
   keepAlive: true
 };
