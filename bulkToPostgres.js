@@ -24,7 +24,7 @@ const PG_CONFIG = {
   port: 5432,
   database: 'newDB',
   user: 'postgres',
-  password: 'Hello@2050',
+  password: 'Smile@2050',
   ssl: { rejectUnauthorized: false },
   keepAlive: true
 };
