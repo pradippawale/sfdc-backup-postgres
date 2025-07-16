@@ -20,15 +20,14 @@ const INSTANCE_URL = 'https://coresolute4-dev-ed.develop.my.salesforce.com';
 const API_VERSION = 'v60.0';
 
 const PG_CONFIG = {
-  host: 'localhost',
+  host: 'dpg-d1i3u8fdiees73cf0dug-a.oregon-postgres.render.com',
   port: 5432,
-  database: 'postgres',
-  user: 'postgres',
-  password: 'Hello@2050',
+  database: 'sfdatabase_34oi',
+  user: 'sfdatabaseuser',
+  password: 'D898TUsAal4ksBUs5QoQffxMZ6MY5aAH',
   ssl: { rejectUnauthorized: false },
   keepAlive: true
 };
-
 
 // === Helper Functions ===
 async function getAllObjectNames() {
