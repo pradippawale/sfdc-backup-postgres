@@ -15,7 +15,7 @@ const delay = ms => new Promise(res => setTimeout(res, ms));
 let FIELD_TYPES_MAP = {};
 
 // === Configuration ===
-const ACCESS_TOKEN = '00DfJ000002QrbH!AQEAQIsFs9d3V7_gMNAdrsSvibefaOL_rax9i7r7GisiaxbWV8_xzRvxH5ydrBKfNRYKpS_M.tEJtVuUb0KhM8ecTdcRw4Ss';
+const ACCESS_TOKEN = '00DfJ000002QrbH!AQEAQD28KZi53W.xJ.lhWjiZ3F2nVZe5uPVKFWvaq3D3mdlNN43MUi9zDfxfK9wsdtERhC2gB66IKETQTiEAwQOJgRcgGoMg';
 const INSTANCE_URL = 'https://coresolute4-dev-ed.develop.my.salesforce.com';
 const API_VERSION = 'v60.0';
 
@@ -326,4 +326,6 @@ app.post('/api/backup', async (req, res) => {
   });
 });
 
-app.listen(3000, () => console.log('🚀 Server on port 3000'));
+app.listen(3000, '0.0.0.0', () => {
+  console.log('Server running on port 3000');
+});
