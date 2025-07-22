@@ -15,17 +15,17 @@ const delay = ms => new Promise(res => setTimeout(res, ms));
 let FIELD_TYPES_MAP = {};
 
 // === Configuration ===
-const ACCESS_TOKEN = '00DfJ000002QrbH!AQEAQCHlWJkl0woYU6z0FjXtYYNLy5tpcloiso0r.L0WY3LOC.6bPSN3FwDMNNro8sB5CLndu4WE5ZhU4VirJ4Qn0B9ibjkv';
+const ACCESS_TOKEN = '00DfJ000002QrbH!AQEAQIsFs9d3V7_gMNAdrsSvibefaOL_rax9i7r7GisiaxbWV8_xzRvxH5ydrBKfNRYKpS_M.tEJtVuUb0KhM8ecTdcRw4Ss';
 const INSTANCE_URL = 'https://coresolute4-dev-ed.develop.my.salesforce.com';
 const API_VERSION = 'v60.0';
 
 const PG_CONFIG = {
-  host: 'dpg-d1i3u8fdiees73cf0dug-a.oregon-postgres.render.com',
+  host: 'sfdc-backup-db.xxxxxx.us-east-1.rds.amazonaws.com',
   port: 5432,
-  database: 'sfdatabase_34oi',
-  user: 'sfdatabaseuser',
-  password: 'D898TUsAal4ksBUs5QoQffxMZ6MY5aAH',
-  ssl: { rejectUnauthorized: false },
+  database: 'postgres', // Or the name you created
+  user: 'sfbackup_user',
+  password: 'Smile2050', 
+  ssl: false, // or set to { rejectUnauthorized: false } for RDS with SSL
   keepAlive: true
 };
 
