@@ -14,17 +14,18 @@ const pLimit = require('p-limit');
 const delay = ms => new Promise(res => setTimeout(res, ms));
 let FIELD_TYPES_MAP = {};
 
+
 // === Configuration ===
-const ACCESS_TOKEN = '00DfJ000002QrbH!AQEAQD28KZi53W.xJ.lhWjiZ3F2nVZe5uPVKFWvaq3D3mdlNN43MUi9zDfxfK9wsdtERhC2gB66IKETQTiEAwQOJgRcgGoMg';
-const INSTANCE_URL = 'https://coresolute4-dev-ed.develop.my.salesforce.com';
+const ACCESS_TOKEN = '00DRL000003J3LR!AQEAQPtmFQRjwFveCTL96mETRkIJR6qijhuUkrk56jNy0ECTxEFlsn29Q8t28E53fnF0eRk32wRmMmQOSSOBVEE0myB9hZQp';
+const INSTANCE_URL = 'https://coresolute--coredev1.sandbox.my.salesforce.com';
 const API_VERSION = 'v60.0';
 
 const PG_CONFIG = {
-  host: 'sfdc-backup-db.xxxxxx.us-east-1.rds.amazonaws.com',
-  port: 5432,
+  host: 'sfbackup.chgsy0sgmkl1.eu-north-1.rds.amazonaws.com',
+    port: 5432,
   database: 'postgres', // Or the name you created
   user: 'sfbackup_user',
-  password: 'Smile2050', 
+  password: 'Smile2050',
   ssl: false, // or set to { rejectUnauthorized: false } for RDS with SSL
   keepAlive: true
 };
@@ -33,22 +34,45 @@ const PG_CONFIG = {
 async function getAllObjectNames() {
   const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects`;
   const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
-  return res.data.sobjects
-    .filter(o => o.queryable && !o.name.match(/(__Share|__Tag|__History|__Feed|ChangeEvent)/))
-    .map(o => o.name);
+   return res.data.sobjects
+  .filter(o => o.queryable)
+  .map(o => o.name);
 }
 
 async function getAllFields(objectName) {
-  const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects/${objectName}/describe`;
-  const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
-  FIELD_TYPES_MAP = {};
-  const unsupported = ['address', 'location', 'base64', 'json'];
-  const fields = res.data.fields
-    .filter(f => !unsupported.includes(f.type) && (!f.compoundFieldName || f.name === 'Name'))
-    .map(f => { FIELD_TYPES_MAP[f.name] = f.type; return f.name; });
-  if (!fields.includes('Id')) fields.unshift('Id');
-  if (!fields.includes('Name')) fields.unshift('Name');
-  return [...new Set(fields)];
+    try {
+        const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects/${objectName}/describe`;
+        const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
+
+        FIELD_TYPES_MAP = {};
+		        const unsupported = ['address', 'location', 'base64', 'json'];
+
+        let fields = res.data.fields
+            .filter(f =>
+                !unsupported.includes(f.type) &&
+                (!f.compoundFieldName || f.name === 'Name')
+            )
+            .map(f => {
+                FIELD_TYPES_MAP[f.name] = f.type;
+                return f.name;
+            });
+
+        if (!fields.includes('Id')) {
+            fields.unshift('Id');
+            FIELD_TYPES_MAP['Id'] = 'id';
+        }
+
+        const hasName = res.data.fields.find(f => f.name === 'Name');
+		        if (hasName && !fields.includes('Name')) {
+            fields.unshift('Name');
+            FIELD_TYPES_MAP['Name'] = hasName.type;
+        }
+
+        return [...new Set(fields)];
+    } catch (err) {
+        console.warn(`⚠️FFailed to get fields for ${objectName}: ${err.message}`);
+        return [];
+    }
 }
 
 async function getLastBackupTime(objectName) {
@@ -68,7 +92,7 @@ async function setLastBackupTime(objectName) {
   await client.connect();
   try {
     await client.query(`
-      INSERT INTO last_backup (object_name, last_run)
+        INSERT INTO last_backup (object_name, last_run)
       VALUES ($1, NOW())
       ON CONFLICT (object_name) DO UPDATE SET last_run = NOW();
     `, [objectName]);
@@ -86,12 +110,12 @@ async function hasRecentChangesSince(objectName, sinceTimestamp) {
   } catch {
     return false;
   }
-}
+  }
 
 async function createBulkQueryJob(soql) {
   const url = `${INSTANCE_URL}/services/data/${API_VERSION}/jobs/query`;
   const res = await axios.post(url, {
-    operation: 'query',
+  operation: 'query',
     query: soql,
     contentType: 'CSV'
   }, {
@@ -108,7 +132,7 @@ async function pollJob(jobId) {
     if (Date.now() - start > 300000) throw new Error(`Timeout on job ${jobId}`);
     const res = await axios.get(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
     state = res.data.state;
-    if (state === 'JobComplete') return;
+	    if (state === 'JobComplete') return;
     if (['Failed', 'Aborted'].includes(state)) throw new Error(`Job ${state}`);
     await delay(3000);
   }
@@ -131,14 +155,14 @@ async function cleanCSV(filePath) {
   const parser = fs.createReadStream(filePath).pipe(parse({ columns: true, skip_empty_lines: true }));
   const writer = fs.createWriteStream(outputPath);
   const stringifier = stringify({ header: true });
-  parser.on('data', row => {
+    parser.on('data', row => {
     for (let key in row) row[key] = row[key] === '' ? '\\N' : row[key];
     stringifier.write(row);
   });
   parser.on('end', () => stringifier.end());
   stringifier.pipe(writer);
   return new Promise((resolve, reject) => {
-    writer.on('finish', () => resolve(outputPath));
+  writer.on('finish', () => resolve(outputPath));
     writer.on('error', reject);
     parser.on('error', reject);
   });
@@ -154,7 +178,7 @@ async function insertToPostgres(cleanPath, objectName) {
   // Ensure table exists with unique constraint
   await client.query(`
     CREATE TABLE IF NOT EXISTS "${objectName}" (
-      ${headers.map(h => `"${h}" TEXT`).join(', ')},
+	      ${headers.map(h => `"${h}" TEXT`).join(', ')},
       UNIQUE ("Id")
     );
   `);
@@ -172,11 +196,12 @@ async function insertToPostgres(cleanPath, objectName) {
   });
 
   const upsertSQL = `
-    INSERT INTO "${objectName}" (${headers.map(h => `"${h}"`).join(', ')})
-    SELECT ${headers.map(h => `"${h}"`).join(', ')} FROM ${tempTable}
-    ON CONFLICT ("Id") DO UPDATE SET
-    ${headers.filter(h => h !== 'Id').map(h => `"${h}" = EXCLUDED."${h}"`).join(', ')};
-  `;
+  INSERT INTO "${objectName}" (${headers.map(h => `"${h}"`).join(', ')})
+  SELECT DISTINCT ON ("Id") ${headers.map(h => `"${h}"`).join(', ')} FROM ${tempTable}
+  ON CONFLICT ("Id") DO UPDATE SET
+  ${headers.filter(h => h !== 'Id').map(h => `"${h}" = EXCLUDED."${h}"`).join(', ')};
+`;
+
 
   await client.query(upsertSQL);
   const res = await client.query(`SELECT COUNT(*) FROM ${tempTable}`);
@@ -185,53 +210,128 @@ async function insertToPostgres(cleanPath, objectName) {
 }
 
 // 🔁 Main Backup Logic
-async function backupObject(objectName, mode = 'incremental') {
+async function backupObject(objectName, mode = 'incremental', dateStr, conn) {
   let rawPath, cleanPath;
   console.time(`🔁 ${objectName}`);
 
   try {
     const fields = await getAllFields(objectName);
-    if (!fields.includes('LastModifiedDate')) return;
+    const hasLastModified = fields.includes('LastModifiedDate');
+    const lastTime = await getLastBackupTime(objectName);
 
-    let soql = `SELECT ${fields.join(', ')} FROM ${objectName}`;
+    // Step 1: Check if incremental and skip if no recent changes
     if (mode === 'incremental') {
-      const lastTime = await getLastBackupTime(objectName);
-      const hasChanges = await hasRecentChangesSince(objectName, lastTime);
-      if (!hasChanges) return;
-      soql += ` WHERE LastModifiedDate > ${lastTime.toISOString()}`;
+      const hasChanges = hasLastModified
+        ? await hasRecentChangesSince(objectName, lastTime)
+		        : true; // fallback to true if no LastModifiedDate
+
+      if (!hasChanges) {
+        await logBackupToSalesforce({
+          objectName,
+          recordCount: 0,
+          status: 'Skipped',
+          error: 'No recent changes found.'
+        });
+        console.log(`⏭️ Skipped ${objectName} (no recent changes)`);
+        return;
+      }
+    }
+	
+    // Step 2: Build SOQL
+    let soql;
+    if (mode === 'incremental' && hasLastModified) {
+      soql = `SELECT ${fields.join(', ')} FROM ${objectName} WHERE LastModifiedDate > ${lastTime.toISOString()}`;
+    } else if (mode === 'full' && hasLastModified) {
+      soql = `SELECT ${fields.join(', ')} FROM ${objectName} WHERE LastModifiedDate >= ${dateStr}`;
+    } else {
+      soql = `SELECT ${fields.join(', ')} FROM ${objectName}`;
     }
 
-    const job = await createBulkQueryJob(soql);
-    await pollJob(job.id);
+    // Step 3: Run SOQL via Bulk API
+    let job;
+    try {
+      job = await createBulkQueryJob(soql);
+      await pollJob(job.id);
+    } catch (jobErr) {
+      const status = jobErr.response?.status;
+      const data = jobErr.response?.data;
+      console.error(`❌ ${objectName} SOQL job failed`);
+      console.error(`Status: ${status}`);
+      console.error(`Response:`, JSON.stringify(data, null, 2));
+      console.error(`Error: ${jobErr.message}`);
+	  
+      await logBackupToSalesforce({
+        objectName,
+        recordCount: 0,
+        status: 'Failed',
+        error: `Bulk query job failed: ${jobErr.message}`
+      });
+      return;
+    }
+
+    // Step 4: Download and clean CSV
     rawPath = await downloadResults(job.id);
     cleanPath = await cleanCSV(rawPath);
+
+    // Step 5: Check if data has more than header
+    const lineCount = await new Promise((resolve, reject) => {
+      let count = 0;
+      fs.createReadStream(cleanPath)
+        .on('data', chunk => {
+          count += chunk.toString().split('\n').length - 1;
+        })
+        .on('end', () => resolve(count))
+        .on('error', reject);
+		    });
+
+    if (lineCount <= 1) {
+      await logBackupToSalesforce({
+        objectName,
+        recordCount: 0,
+        status: 'Skipped',
+        error: 'No records found for backup.',
+        csvFilePath: cleanPath
+      });
+      console.log(`⏭️ Skipped ${objectName} (no records)`);
+      return;
+    }
+
+    // Step 6: Insert to Postgres
     const count = await insertToPostgres(cleanPath, objectName);
     await setLastBackupTime(objectName);
 
     console.log(`✅ ${objectName}: ${count} records backed up.`);
-
     await logBackupToSalesforce({
       objectName,
       recordCount: count,
-      status: 'Success',
+	        status: 'Success',
       csvFilePath: cleanPath
     });
+
   } catch (err) {
-    console.error(`❌ ${objectName}: ${err.message}`);
+    const status = err.response?.status;
+    const data = err.response?.data;
+    console.error(`❌ ${objectName} backup failed`);
+    console.error(`Status: ${status}`);
+    console.error(`Response:`, JSON.stringify(data, null, 2));
+    console.error(`Error: ${err.message}`);
+    console.error(err.stack);
 
     await logBackupToSalesforce({
       objectName,
       recordCount: 0,
       status: 'Failed',
-      error: err.message
+	        error: err.message
     });
+
   } finally {
     if (rawPath && fs.existsSync(rawPath)) fs.unlinkSync(rawPath);
     if (cleanPath && fs.existsSync(cleanPath)) fs.unlinkSync(cleanPath);
     console.timeEnd(`🔁 ${objectName}`);
-  }
+        }
 }
 
+//Log Backup to salesforce
 async function logBackupToSalesforce({ objectName, recordCount, status, error = '', csvFilePath = '' }) {
   const url = `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects/Backup_Log__c`;
 
@@ -244,7 +344,7 @@ async function logBackupToSalesforce({ objectName, recordCount, status, error = 
   };
 
   try {
-    const res = await axios.post(url, body, {
+      const res = await axios.post(url, body, {
       headers: {
         Authorization: `Bearer ${ACCESS_TOKEN}`,
         'Content-Type': 'application/json'
@@ -267,7 +367,7 @@ async function logBackupToSalesforce({ objectName, recordCount, status, error = 
         {
           headers: {
             Authorization: `Bearer ${ACCESS_TOKEN}`,
-            'Content-Type': 'application/json'
+			            'Content-Type': 'application/json'
           }
         }
       );
@@ -277,13 +377,15 @@ async function logBackupToSalesforce({ objectName, recordCount, status, error = 
       const queryRes = await axios.get(
         `${INSTANCE_URL}/services/data/${API_VERSION}/query?q=` +
         encodeURIComponent(`SELECT ContentDocumentId FROM ContentVersion WHERE Id = '${contentVersionId}'`),
-        { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } }
+        {
+          headers: { Authorization: `Bearer ${ACCESS_TOKEN}` }
+        }
       );
 
       const contentDocumentId = queryRes.data.records?.[0]?.ContentDocumentId;
 
       if (contentDocumentId) {
-        await axios.post(
+	          await axios.post(
           `${INSTANCE_URL}/services/data/${API_VERSION}/sobjects/ContentDocumentLink`,
           {
             ContentDocumentId: contentDocumentId,
@@ -303,10 +405,19 @@ async function logBackupToSalesforce({ objectName, recordCount, status, error = 
 
     console.log(`📝 Backup log created for ${objectName}`);
   } catch (err) {
-    const msg = err.response?.data?.[0]?.message || err.message;
-    console.error(`⚠️ Failed to log backup for ${objectName}: ${msg}`);
+    const status = err.response?.status;
+    const data = err.response?.data;
+	
+    console.error(`⚠️ Failed to log backup for ${objectName}`);
+    console.error(`Status Code: ${status}`);
+    console.error(`Response Body:`, JSON.stringify(data, null, 2));
+    console.error(`Stack:`, err.stack);
   }
 }
+
+
+
+
 
 // === Express Server ===
 const app = express();
@@ -315,17 +426,55 @@ app.use(express.json());
 app.post('/api/backup', async (req, res) => {
   const list = req.body.objectNames || [];
   const mode = req.body.mode === 'full' ? 'full' : 'incremental';
-  const all = await getAllObjectNames();
-  const toBackup = list.length ? all.filter(o => list.includes(o)) : all;
+
+  const allObjects = await getAllObjectNames();
+  const toBackup = list.length ? allObjects.filter(o => list.includes(o)) : allObjects;
+  
+  // Respond immediately
   res.json({ message: `🔄 ${mode} backup started...`, objects: toBackup });
 
+  // Run backup in background using batches
   process.nextTick(async () => {
-    const limit = pLimit(5);
-    const tasks = toBackup.map(obj => limit(() => backupObject(obj, mode)));
-    await Promise.all(tasks);
+    const BATCH_SIZE = 200;
+    const batches = [];
+    for (let i = 0; i < toBackup.length; i += BATCH_SIZE) {
+      batches.push(toBackup.slice(i, i + BATCH_SIZE));
+    }
+
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
+      console.log(`🚀 Starting batch ${batchIndex + 1}/${batches.length} (${batch.length} objects)`);
+
+      const limit = pLimit(5); // still process max 5 in parallel
+          const dateStr = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(); // 30 days ago
+      const conn = { query: () => { throw new Error("conn.query not implemented"); } }; // 🔧 Replace with actual conn object if needed
+      const tasks = batch.map(obj => limit(async () => {
+  const TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
+  try {
+    await Promise.race([
+      backupObject(obj, mode, dateStr, conn),
+      new Promise((_, reject) => setTimeout(() => reject(new Error(`Timeout after 2 minutes`)), TIMEOUT_MS))
+    ]);
+  } catch (err) {
+    console.error(`⏳ Timeout or failure on ${obj}: ${err.message}`);
+    await logBackupToSalesforce({
+      objectName: obj,
+      recordCount: 0,
+      status: 'Failed',
+      error: `Timeout or unexpected error: ${err.message}`
+    });
+  }
+}));
+await Promise.all(tasks);
+
+
+      console.log(`✅ Finished batch ${batchIndex + 1}\n`);
+	      }
+    console.log('🎉 All object backups completed.');
   });
 });
 
+
 app.listen(3000, '0.0.0.0', () => {
-  console.log('Server running on port 3000');
+  console.log('🚀 Server on port 3000');
 });
